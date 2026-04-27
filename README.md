@@ -35,11 +35,29 @@ commands / subagents / hooks / MCP) is documented in
 
 ## Install on macOS / Linux
 
-You need Node 20+ on your PATH. Then:
+### Quick install (one command)
 
 ```bash
-git clone <this-repo-url> enclo-cli
-cd enclo-cli
+curl -fsSL https://raw.githubusercontent.com/HamadaGabrIbrahim/enclo-code/main/bootstrap.sh | bash
+```
+
+Requires `git`, `node` (20+), and `npm` on your PATH (install Node with
+`brew install node@20` on macOS, or from https://nodejs.org). The script
+clones the repo into `~/.enclo/cli`, builds it, and links the `enclo`
+binary onto your PATH. Re-running the same command upgrades to the
+latest version.
+
+To install into a different location, set `ENCLO_INSTALL_DIR` first:
+
+```bash
+ENCLO_INSTALL_DIR=~/code/enclo-cli curl -fsSL https://raw.githubusercontent.com/HamadaGabrIbrahim/enclo-code/main/bootstrap.sh | bash
+```
+
+### Manual install
+
+```bash
+git clone https://github.com/HamadaGabrIbrahim/enclo-code.git
+cd enclo-code
 ./install.sh
 ```
 
