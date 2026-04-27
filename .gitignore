@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+.vitest-cache/
+*.log
+.DS_Store
+
+# User state
+.enclo/
+*.enclo-state

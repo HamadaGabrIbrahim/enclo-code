@@ -1,0 +1,12 @@
+node_modules
+dist
+*.log
+.DS_Store
+coverage
+.vitest-cache
+
+# Local user-state — never commit. ~/.enclo/ holds the user's API URL,
+# auth tokens, and persisted permissions; .enclo/ at the repo root holds
+# project-scoped permission overrides and custom commands/agents/hooks.
+.enclo/
+*.enclo-state

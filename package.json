@@ -1,0 +1,17 @@
+{
+  "private": true,
+  "name": "enclo-cli",
+  "description": "Self-hosted enclo CLI — npm workspace bundle (enclo-code + @enclo/core).",
+  "workspaces": [
+    "enclo-code",
+    "enclo-core"
+  ],
+  "scripts": {
+    "build": "npm -w @enclo/core run build && npm -w enclo-code run build",
+    "test": "npm -w @enclo/core test && npm -w enclo-code test",
+    "typecheck": "npm -w @enclo/core run typecheck && npm -w enclo-code run typecheck"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
