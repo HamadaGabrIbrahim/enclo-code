@@ -204,12 +204,11 @@ config: `rm -rf ~/.enclo`.
 
 ## Pairing with the API
 
-The backend lives in a separate repo: `enclo-api` (Python + FastAPI +
+The backend lives in a separate repo: `itkan-llm-api` (Python + FastAPI +
 Postgres + Ollama). Install it on a Linux server with a GPU (or
 locally on a Mac for development):
 
-- Backend repo (placeholder URL — replace once published):
-  https://github.com/enclo/enclo-api
+- Backend repo: https://github.com/HamadaGabrIbrahim/itkan-llm-api
 
 Once the API is running, paste its URL into the CLI's first-run prompt.
 
