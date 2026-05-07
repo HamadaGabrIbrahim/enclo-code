@@ -2,6 +2,7 @@ import React, { useRef, useState } from "react";
 import { Box, Text } from "ink";
 import SelectInput from "ink-select-input";
 import type { Model } from "@enclo/core";
+import { theme } from "../theme.js";
 
 interface ItemProps {
   isSelected?: boolean;
@@ -17,12 +18,12 @@ function ModelItem({ isSelected, label }: ItemProps): React.ReactElement {
   // label format produced below: "Display | id | unavailable?"
   const [name, id, flag] = label.split(" | ");
   const unavailable = flag === "u";
-  const headColor = unavailable
-    ? (isSelected ? "yellow" : undefined)
-    : (isSelected ? "cyan" : undefined);
+  const headColor = isSelected
+    ? (unavailable ? theme.warn : theme.accent)
+    : undefined;
   return (
     <Box flexDirection="column">
-      <Text color={headColor} dimColor={unavailable}>
+      <Text color={headColor} dimColor={unavailable && !isSelected}>
         {name}{unavailable ? " (unavailable)" : ""}
       </Text>
       <Text dimColor>{"   "}{id}</Text>
@@ -64,9 +65,10 @@ export function ModelPicker({
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={1}>
-      <Text bold color="cyan">
-        Select active model (↑/↓ + Enter)
+      <Text bold color={theme.accent}>
+        Select active model
       </Text>
+      <Text color={theme.muted} dimColor>↑/↓ + enter</Text>
       <Box marginTop={1}>
         <SelectInput
           items={items}
@@ -97,12 +99,12 @@ export function ModelPicker({
       </Box>
       {warning && (
         <Box marginTop={1}>
-          <Text color="yellow">⚠ {warning}</Text>
+          <Text color={theme.warn}>⚠ {warning}</Text>
         </Box>
       )}
       <Box marginTop={1}>
-        <Text dimColor>
-          Pulled models render in normal color; (unavailable) entries need a pull.
+        <Text color={theme.muted} dimColor>
+          pulled models render normally; dimmed entries need an upstream pull
         </Text>
       </Box>
     </Box>

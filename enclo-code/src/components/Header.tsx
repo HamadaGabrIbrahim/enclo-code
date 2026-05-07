@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text, useStdout } from "ink";
 import Spinner from "ink-spinner";
+import { theme } from "../theme.js";
 
 export interface HeaderProps {
   email?: string | undefined;
@@ -17,6 +18,12 @@ function truncate(value: string, max: number): string {
   return value.slice(0, max - 1) + "…";
 }
 
+/**
+ * Header is the persistent chrome at the top of the chat. We deliberately
+ * keep it visually quiet: a single dim rule line under one row of metadata.
+ * Only the brand mark uses the accent color so the user's eye lands on
+ * actual content, not the chrome.
+ */
 export function Header({
   email,
   apiUrl,
@@ -26,48 +33,39 @@ export function Header({
 }: HeaderProps): React.ReactElement {
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 120;
-  // Reserve about half the line for the right side; cap each segment so the
-  // header never wraps in narrow terminals.
   const segCap = Math.max(12, Math.floor(cols / 4));
   const url = truncate(apiUrl ?? "(no server)", segCap);
   const who = truncate(email ?? "signed out", segCap);
   const model = truncate(activeModel ?? "(none)", segCap);
   return (
     <Box flexDirection="column">
-      <Box
-        borderStyle="round"
-        borderColor="cyan"
-        paddingX={1}
-        flexDirection="row"
-        justifyContent="space-between"
-      >
+      <Box paddingX={1} flexDirection="row" justifyContent="space-between">
         <Box>
-          <Text color="cyan" bold>
-            enclo
+          <Text color={theme.accent} bold>
+            ● enclo
           </Text>
           {streaming && (
-            <Text color="cyan">  <Spinner type="dots" /></Text>
+            <Text color={theme.accent}>  <Spinner type="dots" /></Text>
           )}
-          <Text color="gray">  {url}</Text>
+          <Text color={theme.muted} dimColor>  {url}</Text>
         </Box>
         <Box>
-          <Text color="green">{who}</Text>
-          <Text color="gray">  model: </Text>
-          <Text color="yellow">{model}</Text>
+          <Text color={theme.muted} dimColor>{who}  ·  </Text>
+          <Text color={theme.muted}>{model}</Text>
         </Box>
       </Box>
-      {planMode && (
-        <Box
-          borderStyle="round"
-          borderColor="magenta"
-          paddingX={1}
-        >
-          <Text color="magenta" bold>
-            [PLAN MODE]
-          </Text>
-          <Text color="gray">  write/exec tools disabled — Shift-Tab or /plan to toggle</Text>
+      {planMode ? (
+        <Box paddingX={1}>
+          <Text color={theme.warn} bold>plan mode</Text>
+          <Text color={theme.muted} dimColor>  write/exec disabled · shift-tab or /plan to toggle</Text>
         </Box>
-      )}
+      ) : null}
+      {/* Subtle separator rule under the chrome */}
+      <Box paddingX={1}>
+        <Text color={theme.border} dimColor>
+          {"─".repeat(Math.max(20, cols - 2))}
+        </Text>
+      </Box>
     </Box>
   );
 }

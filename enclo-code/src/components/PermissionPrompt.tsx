@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import SelectInput from "ink-select-input";
 import type { PermissionPrompt as Prompt, PermissionChoice } from "@enclo/core";
+import { theme } from "../theme.js";
 
 export interface PermissionPromptProps {
   prompt: Prompt;
@@ -22,12 +23,16 @@ function ItemRenderer({ isSelected = false, label }: { isSelected?: boolean; lab
   const text = isPersistent ? label.slice(1) : label;
   if (isPersistent) {
     return (
-      <Text color={isSelected ? "yellow" : "yellow"} dimColor={!isSelected}>
+      <Text color={theme.warn} dimColor={!isSelected}>
         {text}
       </Text>
     );
   }
-  return <Text color={isSelected ? "blue" : undefined}>{text}</Text>;
+  return (
+    <Text color={isSelected ? theme.accent : undefined}>
+      {text}
+    </Text>
+  );
 }
 
 function targetSummary(name: string, args: unknown): string | null {
@@ -117,16 +122,23 @@ export function PermissionPromptView({ prompt }: PermissionPromptProps): React.R
     { key: "deny", label: "Deny", value: { kind: "deny" } },
   ];
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginY={1}>
-      <Text bold color="yellow">
-        enclo wants to: {name}
-      </Text>
+    // No bright yellow border — just a left rule that signals "this is a
+    // gate, not a regular block". Accent on the verb keeps it readable.
+    <Box flexDirection="column" paddingX={1} marginY={1}>
+      <Box>
+        <Text color={theme.accent} bold>
+          ⚠  permission needed
+        </Text>
+        <Text color={theme.muted} dimColor>{"  "}{name}</Text>
+      </Box>
       {target && (
-        <Text color="cyan">{target}</Text>
+        <Box marginTop={0}>
+          <Text color={theme.muted}>{target}</Text>
+        </Box>
       )}
-      <Box flexDirection="column" marginY={1}>
+      <Box flexDirection="column" marginTop={1} marginBottom={1}>
         {previewArgs(prompt.request.args).map((line, idx) => (
-          <Text key={idx} color="gray">
+          <Text key={idx} color={theme.muted} dimColor>
             {line}
           </Text>
         ))}
@@ -136,9 +148,11 @@ export function PermissionPromptView({ prompt }: PermissionPromptProps): React.R
         itemComponent={ItemRenderer}
         onSelect={(item) => prompt.resolve((item as Item).value)}
       />
-      <Text color="gray" dimColor>
-        ─ persistent rules (yellow) apply across sessions ─
-      </Text>
+      <Box marginTop={1}>
+        <Text color={theme.muted} dimColor>
+          persistent rules (in yellow) apply across sessions
+        </Text>
+      </Box>
     </Box>
   );
 }

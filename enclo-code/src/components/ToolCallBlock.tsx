@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import { lineDiff, type ToolDisplay, type ToolResult } from "@enclo/core";
+import { theme } from "../theme.js";
 
 export type ToolStatus = "pending" | "denied" | "done";
 
@@ -25,15 +26,15 @@ export interface ToolCallBlockProps {
 }
 
 const ICONS: Record<ToolStatus, string> = {
-  pending: "⏵",
+  pending: "○",
   denied: "✗",
-  done: "✓",
+  done: "●",
 };
 
 const COLORS: Record<ToolStatus, string> = {
-  pending: "yellow",
-  denied: "red",
-  done: "green",
+  pending: theme.tool.pending,
+  denied: theme.tool.denied,
+  done: theme.tool.done,
 };
 
 function summarize(name: string, args: unknown): string {
@@ -74,23 +75,28 @@ function ToolCallBlockImpl({
   const bashFailed =
     display?.kind === "bash" && display.exitCode !== 0;
   const isError = result?.isError === true || bashFailed;
-  // Iconography must match meaning: a green ✓ next to red text is contradictory.
   const icon = isError ? ICONS.denied : ICONS[status];
-  const color = isError ? "red" : COLORS[status];
+  const color = isError ? theme.tool.error : COLORS[status];
   const headline = summarize(name, args);
 
   return (
-    <Box flexDirection="column" marginBottom={1} marginLeft={1}>
-      <Text color={color}>
-        {icon} {headline}
-      </Text>
+    <Box flexDirection="column" marginBottom={1}>
+      {/*
+        Headline: only the leading dot is colored. The action itself stays
+        in default text. This keeps lines of tool calls visually quiet —
+        you scan the dot column for status, then read the actions normally.
+      */}
+      <Box>
+        <Text color={color}>{icon} </Text>
+        <Text dimColor={status === "pending"}>{headline}</Text>
+      </Box>
       {subAgentEvents && subAgentEvents.length > 0 && (
         <Box flexDirection="column" marginLeft={2}>
-          <Text color="gray" dimColor>
+          <Text color={theme.muted} dimColor>
             └─ sub-agent: {subAgentEvents.length} event{subAgentEvents.length === 1 ? "" : "s"}
           </Text>
           {subAgentEvents.slice(-5).map((e) => (
-            <Text key={e.id} color="gray" dimColor>
+            <Text key={e.id} color={theme.muted} dimColor>
               {"   "}· {e.label}
             </Text>
           ))}
@@ -99,17 +105,17 @@ function ToolCallBlockImpl({
       {status === "pending" && partial && (partial.stdout.length > 0 || partial.stderr.length > 0) && (
         <Box flexDirection="column" marginLeft={2}>
           {partial.stdout.length > 0 && (
-            <Text color="cyan">{previewText(partial.stdout.trimEnd(), 20)}</Text>
+            <Text color={theme.tool.partialStdout}>{previewText(partial.stdout.trimEnd(), 20)}</Text>
           )}
           {partial.stderr.length > 0 && (
-            <Text color="red">{previewText(partial.stderr.trimEnd(), 10)}</Text>
+            <Text color={theme.tool.partialStderr}>{previewText(partial.stderr.trimEnd(), 10)}</Text>
           )}
         </Box>
       )}
       {status === "done" && display && <DisplayBlock display={display} />}
       {status === "done" && !display && result?.content ? (
         <Box marginLeft={2}>
-          <Text color="gray">{previewText(result.content)}</Text>
+          <Text color={theme.muted} dimColor>{previewText(result.content)}</Text>
         </Box>
       ) : null}
     </Box>
@@ -140,7 +146,7 @@ function DisplayBlock({ display }: { display: ToolDisplay }): React.ReactElement
   if (display.kind === "text") {
     return (
       <Box marginLeft={2}>
-        <Text color="gray">{display.preview}</Text>
+        <Text color={theme.muted} dimColor>{display.preview}</Text>
       </Box>
     );
   }
@@ -148,7 +154,7 @@ function DisplayBlock({ display }: { display: ToolDisplay }): React.ReactElement
     return (
       <Box flexDirection="column" marginLeft={2}>
         {display.items.map((item, idx) => (
-          <Text key={idx} color="gray">
+          <Text key={idx} color={theme.muted} dimColor>
             {item}
           </Text>
         ))}
@@ -159,13 +165,13 @@ function DisplayBlock({ display }: { display: ToolDisplay }): React.ReactElement
     return (
       <Box flexDirection="column" marginLeft={2}>
         {display.stdout.length > 0 && (
-          <Text color="gray">{previewText(display.stdout.trimEnd(), 10)}</Text>
+          <Text color={theme.muted} dimColor>{previewText(display.stdout.trimEnd(), 10)}</Text>
         )}
         {display.stderr.length > 0 && (
-          <Text color="red">{previewText(display.stderr.trimEnd(), 5)}</Text>
+          <Text color={theme.error}>{previewText(display.stderr.trimEnd(), 5)}</Text>
         )}
-        <Text color={display.exitCode === 0 ? "green" : "red"}>
-          [exit {display.exitCode}]
+        <Text color={display.exitCode === 0 ? theme.success : theme.error} dimColor>
+          exit {display.exitCode}
         </Text>
       </Box>
     );
@@ -174,12 +180,16 @@ function DisplayBlock({ display }: { display: ToolDisplay }): React.ReactElement
     const lines = lineDiff(display.before, display.after).slice(0, 30);
     return (
       <Box flexDirection="column" marginLeft={2}>
-        <Text color="gray">{display.path}</Text>
+        <Text color={theme.muted} dimColor>{display.path}</Text>
         {lines.map((l, idx) => {
-          const color = l.kind === "add" ? "green" : l.kind === "del" ? "red" : "gray";
+          const color =
+            l.kind === "add" ? theme.success
+            : l.kind === "del" ? theme.error
+            : theme.muted;
           const prefix = l.kind === "add" ? "+ " : l.kind === "del" ? "- " : "  ";
+          const dim = l.kind === "ctx";
           return (
-            <Text key={idx} color={color}>
+            <Text key={idx} color={color} dimColor={dim}>
               {prefix}
               {l.text}
             </Text>

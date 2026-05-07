@@ -30,7 +30,6 @@ describe("Footer", () => {
     const { lastFrame } = render(<Footer usage={usedSome} />);
     await settle();
     const frame = stripAnsi(lastFrame() ?? "");
-    expect(frame).toContain("Tokens");
     expect(frame).toMatch(/1[\.,]?2(3?4?[Kk]?|34)/); // formatTokenCount: 1234 or 1.2k or 1,234
     expect(frame).toContain("in");
     expect(frame).toContain("out");
@@ -42,7 +41,7 @@ describe("Footer", () => {
     const { lastFrame } = render(<Footer usage={usedSome} contextLength={32768} />);
     await settle();
     const frame = stripAnsi(lastFrame() ?? "");
-    expect(frame).toContain("context used");
+    expect(frame).toContain("ctx");
     // 4096/32768 = 12.5%
     expect(frame).toMatch(/1[23]\s*%|12\.5\s*%/);
     await captureFrame("Footer-with-context", lastFrame());

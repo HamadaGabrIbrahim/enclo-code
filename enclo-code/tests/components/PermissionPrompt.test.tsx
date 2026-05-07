@@ -41,7 +41,8 @@ describe("PermissionPromptView", () => {
     const { lastFrame } = render(<PermissionPromptView prompt={prompt} />);
     await settle();
     const frame = stripAnsi(lastFrame() ?? "");
-    expect(frame).toContain("enclo wants to: bash");
+    expect(frame).toContain("permission needed");
+    expect(frame).toContain("bash");
     expect(frame).toContain("command: rm -rf node_modules");
     await captureFrame("PermissionPrompt-bash", lastFrame());
   });

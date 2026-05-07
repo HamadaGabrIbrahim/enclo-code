@@ -116,8 +116,8 @@ describe("Chat", () => {
     const frame = stripAnsi(lastFrame() ?? "");
     // The full thinking text is hidden — only the chars-count summary shows.
     expect(frame).not.toContain("Considering options ");
-    expect(frame).toContain(`+ thinking (${longThinking.length} chars)`);
-    expect(frame).toContain("press r to expand");
+    expect(frame).toContain(`thinking (${longThinking.length} chars)`);
+    expect(frame).toContain("/reasoning to expand");
     expect(frame).toContain("Here's the answer:");
   });
 
@@ -138,7 +138,7 @@ describe("Chat", () => {
     const frame = stripAnsi(lastFrame() ?? "");
     expect(frame).toContain("Listing directory…");
     expect(frame).toContain("Listing /tmp");
-    expect(frame).toContain("✓");
+    expect(frame).toContain("●"); // done indicator
     await captureFrame("Chat-with-tool-call", lastFrame());
   });
 

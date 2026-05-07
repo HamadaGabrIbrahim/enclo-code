@@ -10,6 +10,7 @@ import {
   type CostRates,
   type TokenUsageState,
 } from "@enclo/core";
+import { theme } from "../theme.js";
 
 export interface FooterProps {
   usage: TokenUsageState;
@@ -20,18 +21,21 @@ export interface FooterProps {
 }
 
 const SEVERITY_COLOR: Record<ContextSeverity, string> = {
-  ok: "gray",
-  warn: "yellow",
-  danger: "red",
+  ok: theme.muted,
+  warn: theme.warn,
+  danger: theme.error,
 };
 
+/**
+ * One-line metadata strip below the input. Single dim color throughout
+ * except for the (rare) warn/danger context-fill state. Numbers themselves
+ * are rendered in normal weight so they're scannable.
+ */
 export function Footer({
   usage,
   contextLength,
   costRates,
 }: FooterProps): React.ReactElement | null {
-  // Hide entirely until we have a single completed request — avoids a
-  // distracting "0 in / 0 out" line on first launch.
   if (usage.requestCount === 0) return null;
 
   const ctx = computeContextUsed(usage, contextLength);
@@ -40,25 +44,23 @@ export function Footer({
 
   return (
     <Box paddingX={1}>
-      <Text color="gray">Tokens: </Text>
-      <Text color="cyan">{formatTokenCount(usage.promptTokens)}</Text>
-      <Text color="gray"> in / </Text>
-      <Text color="cyan">{formatTokenCount(usage.completionTokens)}</Text>
-      <Text color="gray"> out</Text>
-      {ctx && (
-        <>
-          <Text color="gray"> · ~</Text>
-          <Text color={SEVERITY_COLOR[ctx.severity]}>
-            {formatPercent(ctx.fraction)}
-          </Text>
-          <Text color="gray"> context used</Text>
-        </>
-      )}
+      <Text color={theme.muted} dimColor>
+        {formatTokenCount(usage.promptTokens)} in · {formatTokenCount(usage.completionTokens)} out
+        {ctx ? "  " : ""}
+      </Text>
+      {ctx && ctx.severity !== "ok" ? (
+        <Text color={SEVERITY_COLOR[ctx.severity]}>
+          {formatPercent(ctx.fraction)} ctx
+        </Text>
+      ) : ctx ? (
+        <Text color={theme.muted} dimColor>
+          {formatPercent(ctx.fraction)} ctx
+        </Text>
+      ) : null}
       {cost !== null && (
-        <>
-          <Text color="gray"> · </Text>
-          <Text color="green">{formatCostUsd(cost)}</Text>
-        </>
+        <Text color={theme.muted} dimColor>
+          {"  · "}{formatCostUsd(cost)}
+        </Text>
       )}
     </Box>
   );

@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import SelectInput from "ink-select-input";
 import { formatTokenCount, type ConversationSummary } from "@enclo/core";
+import { theme } from "../theme.js";
 
 export interface HistoryPickerProps {
   conversations: ConversationSummary[];
@@ -16,7 +17,7 @@ export function HistoryPicker({
   if (conversations.length === 0) {
     return (
       <Box paddingX={1} paddingY={1}>
-        <Text color="gray">No prior conversations.</Text>
+        <Text color={theme.muted} dimColor>No prior conversations.</Text>
       </Box>
     );
   }
@@ -34,9 +35,10 @@ export function HistoryPicker({
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={1}>
-      <Text bold color="cyan">
-        Resume a conversation (↑/↓ + Enter)
+      <Text bold color={theme.accent}>
+        Resume a conversation
       </Text>
+      <Text color={theme.muted} dimColor>↑/↓ + enter</Text>
       <Box marginTop={1}>
         <SelectInput
           items={items}

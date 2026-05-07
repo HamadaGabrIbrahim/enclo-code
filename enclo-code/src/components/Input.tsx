@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
+import { theme } from "../theme.js";
 
 export interface InputProps {
   placeholder?: string;
@@ -57,8 +58,10 @@ export function Input({
   );
 
   return (
-    <Box borderStyle="round" borderColor="gray" paddingX={1}>
-      <Text color="cyan">{"› "}</Text>
+    // No border around the input — visually quieter than a boxed prompt.
+    // The accent-colored chevron is the only visual marker.
+    <Box paddingX={1}>
+      <Text color={theme.accent}>{"❯ "}</Text>
       <TextInput
         value={value}
         onChange={setValue}

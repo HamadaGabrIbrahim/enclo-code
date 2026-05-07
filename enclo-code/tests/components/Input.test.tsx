@@ -9,7 +9,7 @@ describe("Input", () => {
     const { lastFrame } = render(<Input onSubmit={() => {}} />);
     await settle();
     const frame = stripAnsi(lastFrame() ?? "");
-    expect(frame).toContain("›");
+    expect(frame).toContain("❯");
     expect(frame).toContain("Type a message, or /help");
     await captureFrame("Input-empty", lastFrame());
   });

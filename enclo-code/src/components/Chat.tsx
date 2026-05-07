@@ -2,6 +2,7 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { ChatMessage, ToolDisplay, ToolResult } from "@enclo/core";
 import { ToolCallBlock, type ToolStatus } from "./ToolCallBlock.js";
+import { theme } from "../theme.js";
 
 export interface ToolBlock {
   kind: "tool";
@@ -93,7 +94,7 @@ export function Chat({
       )}
       {notice && (
         <Box marginTop={1}>
-          <Text color="gray" italic>
+          <Text color={theme.muted} italic dimColor>
             {notice}
           </Text>
         </Box>
@@ -103,15 +104,15 @@ export function Chat({
 }
 
 function MessageViewImpl({ message }: { message: RenderedMessage }): React.ReactElement {
-  const { color, label } = roleStyle(message.role);
+  const { color, label, dim } = roleStyle(message.role);
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <Text color={color} bold>
+      <Text color={color} bold dimColor={dim}>
         {label}
         {message.pending ? " …" : ""}
       </Text>
       {message.blocks && message.blocks.length > 0 ? (
-        <Box flexDirection="column">
+        <Box flexDirection="column" marginLeft={2} marginTop={0}>
           {message.blocks.map((block) => {
             if (block.kind === "text") {
               return <Text key={block.id}>{block.text}</Text>;
@@ -119,19 +120,19 @@ function MessageViewImpl({ message }: { message: RenderedMessage }): React.React
             if (block.kind === "reasoning") {
               if (block.collapsed) {
                 return (
-                  <Box key={block.id} marginLeft={1}>
-                    <Text color="gray" dimColor italic>
-                      [+ thinking ({block.text.length} chars) — press r to expand]
+                  <Box key={block.id}>
+                    <Text color={theme.reasoning} dimColor italic>
+                      ⌥ thinking ({block.text.length} chars) — /reasoning to expand
                     </Text>
                   </Box>
                 );
               }
               return (
-                <Box key={block.id} marginLeft={1} flexDirection="column">
-                  <Text color="gray" dimColor italic>
-                    thinking…
+                <Box key={block.id} flexDirection="column">
+                  <Text color={theme.reasoning} dimColor italic>
+                    ⌥ thinking…
                   </Text>
-                  <Text color="gray" dimColor italic>
+                  <Text color={theme.reasoning} dimColor italic>
                     {block.text}
                   </Text>
                 </Box>
@@ -152,7 +153,9 @@ function MessageViewImpl({ message }: { message: RenderedMessage }): React.React
           })}
         </Box>
       ) : (
-        <Text>{message.content}</Text>
+        <Box marginLeft={2}>
+          <Text>{message.content}</Text>
+        </Box>
       )}
     </Box>
   );
@@ -172,17 +175,21 @@ const MessageView = React.memo(
   },
 );
 
-function roleStyle(role: ChatMessage["role"]): { color: string; label: string } {
+function roleStyle(role: ChatMessage["role"]): { color: string; label: string; dim?: boolean } {
   switch (role) {
     case "user":
-      return { color: "green", label: "you" };
+      // Dim the user label — they typed it; their attention should be on
+      // the model's response.
+      return { color: theme.role.user, label: "› you", dim: true };
     case "assistant":
-      return { color: "cyan", label: "enclo" };
+      // Accent on the assistant label is the only spot of warm color in
+      // the transcript. It's the line the user is waiting for.
+      return { color: theme.role.assistant, label: "● enclo" };
     case "system":
-      return { color: "gray", label: "system" };
+      return { color: theme.role.system, label: "system", dim: true };
     case "tool":
-      return { color: "magenta", label: "tool" };
+      return { color: theme.role.tool, label: "tool", dim: true };
     default:
-      return { color: "white", label: String(role) };
+      return { color: theme.muted, label: String(role), dim: true };
   }
 }

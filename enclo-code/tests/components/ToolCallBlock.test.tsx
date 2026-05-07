@@ -11,12 +11,12 @@ describe("ToolCallBlock — pending state and summaries", () => {
     );
     await settle();
     const frame = stripAnsi(lastFrame() ?? "");
-    expect(frame).toContain("⏵");
+    expect(frame).toContain("○");
     expect(frame).toContain("Reading /etc/hosts");
     await captureFrame("ToolCallBlock-read-pending", lastFrame());
   });
 
-  it("shows ✓ when done", async () => {
+  it("shows done indicator (●) when done", async () => {
     const { lastFrame } = render(
       <ToolCallBlock
         name="read_file"
@@ -27,7 +27,7 @@ describe("ToolCallBlock — pending state and summaries", () => {
     );
     await settle();
     const frame = stripAnsi(lastFrame() ?? "");
-    expect(frame).toContain("✓");
+    expect(frame).toContain("●");
     expect(frame).toContain("Reading /etc/hosts");
     expect(frame).toContain("127.0.0.1 localhost");
     await captureFrame("ToolCallBlock-read-done", lastFrame());
@@ -55,8 +55,8 @@ describe("ToolCallBlock — pending state and summaries", () => {
     );
     await settle();
     const frame = stripAnsi(lastFrame() ?? "");
-    expect(frame).toContain("✗"); // not ✓
-    expect(frame).not.toMatch(/^\s*✓/);
+    expect(frame).toContain("✗"); // not ●
+    expect(frame).not.toMatch(/^\s*●/);
     expect(frame).toContain("Reading /missing");
     expect(frame).toContain("ENOENT");
     await captureFrame("ToolCallBlock-read-error", lastFrame());
@@ -74,8 +74,8 @@ describe("ToolCallBlock — pending state and summaries", () => {
     await settle();
     const frame = stripAnsi(lastFrame() ?? "");
     expect(frame).toContain("✗");
-    expect(frame).toContain("[exit 1]");
-    expect(frame.split("\n")[0]).not.toContain("✓");
+    expect(frame).toContain("exit 1");
+    expect(frame.split("\n")[0]).not.toContain("●");
   });
 });
 
@@ -152,7 +152,7 @@ describe("ToolCallBlock — display variants", () => {
     const frame = stripAnsi(lastFrame() ?? "");
     expect(frame).toContain("1");
     expect(frame).toContain("2");
-    expect(frame).toContain("[exit 0]");
+    expect(frame).toContain("exit 0");
     await captureFrame("ToolCallBlock-display-bash-ok", lastFrame());
   });
 
@@ -168,7 +168,7 @@ describe("ToolCallBlock — display variants", () => {
     await settle();
     const frame = stripAnsi(lastFrame() ?? "");
     expect(frame).toContain("✗"); // not ✓ — exit 1 is a failure
-    expect(frame).toContain("[exit 1]");
+    expect(frame).toContain("exit 1");
     await captureFrame("ToolCallBlock-display-bash-fail", lastFrame());
   });
 

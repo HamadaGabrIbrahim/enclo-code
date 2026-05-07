@@ -41,8 +41,8 @@ describe("Header", () => {
     );
     await settle();
     const frame = stripAnsi(lastFrame() ?? "");
-    expect(frame).toContain("[PLAN MODE]");
-    expect(frame).toContain("write/exec tools disabled");
+    expect(frame).toContain("plan mode");
+    expect(frame).toContain("write/exec disabled");
     await captureFrame("Header-plan-mode", lastFrame());
   });
 
@@ -51,6 +51,6 @@ describe("Header", () => {
       <Header apiUrl="http://x" email="a@b.co" activeModel="m" planMode={false} />,
     );
     await settle();
-    expect(lastFrame() ?? "").not.toContain("[PLAN MODE]");
+    expect(stripAnsi(lastFrame() ?? "")).not.toContain("plan mode");
   });
 });
