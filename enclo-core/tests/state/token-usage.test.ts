@@ -137,11 +137,15 @@ describe("computeCostUsd", () => {
 });
 
 describe("formatters", () => {
-  it("formatTokenCount adds thousands separators", () => {
+  it("formatTokenCount uses commas under 10k and abbreviates above", () => {
     expect(formatTokenCount(0)).toBe("0");
     expect(formatTokenCount(123)).toBe("123");
     expect(formatTokenCount(1234)).toBe("1,234");
-    expect(formatTokenCount(1234567)).toBe("1,234,567");
+    expect(formatTokenCount(9999)).toBe("9,999");
+    expect(formatTokenCount(12345)).toBe("12.3k");
+    expect(formatTokenCount(15000)).toBe("15k");
+    expect(formatTokenCount(1234567)).toBe("1.2M");
+    expect(formatTokenCount(2_000_000)).toBe("2M");
   });
 
   it("formatTokenCount handles edge cases", () => {

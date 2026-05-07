@@ -53,8 +53,15 @@ export interface AgentToolCall {
  */
 export type AgentEvent =
   | { type: "assistant_text"; delta: string }
+  | { type: "assistant_reasoning"; delta: string }
   | { type: "tool_call_partial"; index: number; call: Partial<AgentToolCall> }
   | { type: "tool_call_pending"; call: AgentToolCall }
+  /**
+   * Live progress fragment from a long-running tool (notably bash). The
+   * TUI buffers these per call_id and renders them in the tool block as
+   * they arrive — final tool_result still carries the authoritative output.
+   */
+  | { type: "tool_partial"; call_id: string; channel: "stdout" | "stderr"; content: string }
   | {
       type: "tool_result";
       call_id: string;
@@ -89,6 +96,7 @@ export type AgentEvent =
  */
 export type StreamEvent =
   | { type: "delta"; content: string }
+  | { type: "reasoning"; content: string }
   | { type: "tool_call_delta"; index: number; id?: string; name?: string; arguments?: string }
   | {
       type: "end";
@@ -150,6 +158,46 @@ export interface RunAgentOptions {
    * lookups without a global lookup.
    */
   subagents?: ReadonlyMap<string, SubagentSpec>;
+  /**
+   * Max ms with no SSE event before the loop aborts the turn. Protects
+   * against a hung upstream model server. Default 60_000. Zero or negative
+   * disables the watchdog.
+   */
+  streamIdleTimeoutMs?: number;
+}
+
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 60_000;
+
+/**
+ * Iterate `stream.events` with a configurable idle watchdog. If no event
+ * arrives within `idleMs`, throws `Error("stream_idle_timeout")` so the
+ * caller can surface it as agent_error and abort the turn.
+ */
+async function* withIdleTimeout<T>(
+  source: AsyncIterable<T>,
+  idleMs: number,
+): AsyncGenerator<T, void, void> {
+  if (idleMs <= 0) {
+    yield* source;
+    return;
+  }
+  const iter = source[Symbol.asyncIterator]();
+  for (;;) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const idle = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error("stream_idle_timeout")),
+        idleMs,
+      );
+    });
+    try {
+      const next = (await Promise.race([iter.next(), idle])) as IteratorResult<T>;
+      if (next.done) return;
+      yield next.value;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
 }
 
 const DEFAULT_MAX_ITERATIONS = 25;
@@ -203,27 +251,46 @@ export async function* runAgent(opts: RunAgentOptions): AsyncGenerator<AgentEven
     let streamError: string | undefined;
     let endUsage: { prompt_tokens?: number; completion_tokens?: number } | undefined;
 
-    for await (const ev of stream.events) {
-      if (ev.type === "delta") {
-        assistantMsg.content += ev.content;
-        yield { type: "assistant_text", delta: ev.content };
-      } else if (ev.type === "tool_call_delta") {
-        const slot = assistantMsg.tool_calls[ev.index] ?? {
-          id: "",
-          type: "function" as const,
-          function: { name: "", arguments: "" },
-        };
-        if (ev.id) slot.id = ev.id;
-        if (ev.name) slot.function.name = ev.name;
-        if (ev.arguments) slot.function.arguments += ev.arguments;
-        assistantMsg.tool_calls[ev.index] = slot;
-        yield { type: "tool_call_partial", index: ev.index, call: slot };
-      } else if (ev.type === "end") {
-        finishReason = ev.finishReason;
-        if (ev.usage) endUsage = ev.usage;
-      } else if (ev.type === "error") {
-        streamError = ev.message;
+    const idleMs = opts.streamIdleTimeoutMs ?? DEFAULT_STREAM_IDLE_TIMEOUT_MS;
+    try {
+      for await (const ev of withIdleTimeout(stream.events, idleMs)) {
+        if (ev.type === "delta") {
+          assistantMsg.content += ev.content;
+          yield { type: "assistant_text", delta: ev.content };
+        } else if (ev.type === "reasoning") {
+          // Surface CoT chunks but do NOT add them to the persisted
+          // assistant content — reasoning is rendered separately and
+          // not included in saved messages.
+          yield { type: "assistant_reasoning", delta: ev.content };
+        } else if (ev.type === "tool_call_delta") {
+          const slot = assistantMsg.tool_calls[ev.index] ?? {
+            id: "",
+            type: "function" as const,
+            function: { name: "", arguments: "" },
+          };
+          if (ev.id) slot.id = ev.id;
+          if (ev.name) slot.function.name = ev.name;
+          if (ev.arguments) slot.function.arguments += ev.arguments;
+          assistantMsg.tool_calls[ev.index] = slot;
+          yield { type: "tool_call_partial", index: ev.index, call: slot };
+        } else if (ev.type === "end") {
+          finishReason = ev.finishReason;
+          if (ev.usage) endUsage = ev.usage;
+        } else if (ev.type === "error") {
+          streamError = ev.message;
+        }
       }
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (msg === "stream_idle_timeout") {
+        yield {
+          type: "agent_error",
+          message: `stream idle timeout: no event from server for ${idleMs} ms`,
+        };
+      } else {
+        yield { type: "agent_error", message: msg };
+      }
+      return;
     }
 
     if (streamError) {
@@ -267,60 +334,105 @@ export async function* runAgent(opts: RunAgentOptions): AsyncGenerator<AgentEven
       return;
     }
 
-    // Execute each tool call in order.
+    // Execute tool calls. Read-only tools (category "read") run concurrently
+    // for a turn — claude-code-style; write/exec tools serialize so that
+    // side-effecting calls observe each other's results in declaration order.
+    // Yielded event ordering and the appended message order match the order
+    // the model emitted the calls.
+    //
+    // Synthesize ids and yield tool_call_pending up-front so the TUI shows
+    // every call immediately rather than as each one resolves.
     for (const call of assistantMsg.tool_calls) {
-      // Defensive: synthesize an id if the model/server omitted one.
       if (!call.id) call.id = `call_${Math.random().toString(36).slice(2, 10)}`;
       yield { type: "tool_call_pending", call };
+    }
+
+    type CallOutcome = {
+      preEvents: AgentEvent[];
+      result: ToolResult;
+      subAgentEvents: AgentEvent[];
+      postEvents: AgentEvent[];
+      denied: boolean;
+    };
+
+    type PartialChunk = { channel: "stdout" | "stderr"; content: string };
+    type PartialQueue = {
+      push: (c: PartialChunk) => void;
+      close: () => void;
+      drain: () => AsyncGenerator<PartialChunk, void, void>;
+    };
+    const makePartialQueue = (): PartialQueue => {
+      const items: PartialChunk[] = [];
+      const wakers: Array<() => void> = [];
+      let closed = false;
+      return {
+        push: (c) => {
+          items.push(c);
+          const w = wakers.shift();
+          if (w) w();
+        },
+        close: () => {
+          closed = true;
+          while (wakers.length) wakers.shift()!();
+        },
+        async *drain() {
+          for (;;) {
+            while (items.length > 0) yield items.shift()!;
+            if (closed) return;
+            await new Promise<void>((resolve) => wakers.push(resolve));
+          }
+        },
+      };
+    };
+
+    type CallHandle = {
+      partials: AsyncGenerator<PartialChunk, void, void>;
+      outcome: Promise<CallOutcome>;
+    };
+
+    const runOneInner = async (call: AgentToolCall, queue: PartialQueue): Promise<CallOutcome> => {
+      const preEvents: AgentEvent[] = [];
+      const postEvents: AgentEvent[] = [];
+      const subAgentEvents: AgentEvent[] = [];
 
       const tool = opts.tools.get(call.function.name);
       if (!tool) {
-        const result: ToolResult = {
-          isError: true,
-          content: `Unknown tool: ${call.function.name}`,
+        return {
+          preEvents,
+          result: { isError: true, content: `Unknown tool: ${call.function.name}` },
+          subAgentEvents,
+          postEvents,
+          denied: false,
         };
-        yield { type: "tool_result", call_id: call.id, name: call.function.name, result };
-        messages.push({
-          role: "tool",
-          tool_call_id: call.id,
-          name: call.function.name,
-          content: result.content,
-        });
-        continue;
       }
 
       let parsedArgs: unknown = {};
-      let parseError: string | undefined;
       const argText = call.function.arguments?.trim() ?? "";
       if (argText.length > 0) {
         try {
           parsedArgs = JSON.parse(argText);
         } catch (err) {
-          parseError = `Invalid JSON arguments for ${call.function.name}: ${(err as Error).message}`;
+          return {
+            preEvents,
+            result: {
+              isError: true,
+              content: `Invalid JSON arguments for ${call.function.name}: ${(err as Error).message}`,
+            },
+            subAgentEvents,
+            postEvents,
+            denied: false,
+          };
         }
-      }
-      if (parseError) {
-        const result: ToolResult = { isError: true, content: parseError };
-        yield { type: "tool_result", call_id: call.id, name: call.function.name, result };
-        messages.push({
-          role: "tool",
-          tool_call_id: call.id,
-          name: call.function.name,
-          content: result.content,
-        });
-        continue;
       }
 
       if (opts.planMode && (tool.category === "write" || tool.category === "exec")) {
-        const blocked: ToolResult = { content: PLAN_MODE_BLOCKED_RESULT };
-        yield { type: "tool_result", call_id: call.id, name: call.function.name, result: blocked };
-        messages.push({
-          role: "tool",
-          tool_call_id: call.id,
-          name: call.function.name,
-          content: blocked.content,
-        });
-        continue;
+        return {
+          preEvents,
+          result: { content: PLAN_MODE_BLOCKED_RESULT },
+          subAgentEvents,
+          postEvents,
+          denied: false,
+        };
       }
 
       if (opts.hooks) {
@@ -330,29 +442,22 @@ export async function* runAgent(opts: RunAgentOptions): AsyncGenerator<AgentEven
           tool_args: parsedArgs,
           cwd: opts.cwd,
         });
-        for (const w of pre.warnings) yield { type: "hook_warning", message: w };
-        for (const n of pre.notices) yield { type: "hook_notice", message: n };
+        for (const w of pre.warnings) preEvents.push({ type: "hook_warning", message: w });
+        for (const n of pre.notices) preEvents.push({ type: "hook_notice", message: n });
         if (pre.blocked) {
-          const synthetic: ToolResult = {
-            isError: true,
-            content: JSON.stringify({
-              error: "blocked_by_hook",
-              message: pre.blockMessage ?? "blocked by hook",
-            }),
+          return {
+            preEvents,
+            result: {
+              isError: true,
+              content: JSON.stringify({
+                error: "blocked_by_hook",
+                message: pre.blockMessage ?? "blocked by hook",
+              }),
+            },
+            subAgentEvents,
+            postEvents,
+            denied: false,
           };
-          yield {
-            type: "tool_result",
-            call_id: call.id,
-            name: call.function.name,
-            result: synthetic,
-          };
-          messages.push({
-            role: "tool",
-            tool_call_id: call.id,
-            name: call.function.name,
-            content: synthetic.content,
-          });
-          continue;
         }
       }
 
@@ -363,25 +468,15 @@ export async function* runAgent(opts: RunAgentOptions): AsyncGenerator<AgentEven
       });
 
       if (decision === "deny") {
-        const denial: ToolResult = {
-          isError: true,
-          content: "User denied this tool call.",
+        return {
+          preEvents,
+          result: { isError: true, content: "User denied this tool call." },
+          subAgentEvents,
+          postEvents,
+          denied: true,
         };
-        yield { type: "tool_denied", call_id: call.id, name: call.function.name };
-        yield { type: "tool_result", call_id: call.id, name: call.function.name, result: denial };
-        messages.push({
-          role: "tool",
-          tool_call_id: call.id,
-          name: call.function.name,
-          content: denial.content,
-        });
-        continue;
       }
 
-      // Build agent hooks for this tool call. Sub-agent events are
-      // buffered here and flushed after execute() resolves so we can
-      // yield them in order (generator can't yield from within an
-      // awaited callback).
       const subAgentBuffer: AgentEvent[] = [];
       const hooks: AgentToolHooks = {
         depth: opts.depth ?? 0,
@@ -413,27 +508,15 @@ export async function* runAgent(opts: RunAgentOptions): AsyncGenerator<AgentEven
 
       let result: ToolResult;
       try {
-        result = await tool.execute(parsedArgs, { cwd: opts.cwd, agent: hooks });
+        result = await tool.execute(parsedArgs, {
+          cwd: opts.cwd,
+          agent: hooks,
+          onPartial: (chunk) => queue.push(chunk),
+        });
       } catch (err) {
         result = { isError: true, content: `Error: ${(err as Error).message}` };
       }
-      // Flush any sub-agent events captured during execute().
-      for (const ev of subAgentBuffer) {
-        yield { type: "sub_agent_event", parentCallId: call.id, event: ev };
-      }
-      yield {
-        type: "tool_result",
-        call_id: call.id,
-        name: call.function.name,
-        result,
-        ...(result.display ? { display: result.display } : {}),
-      };
-      messages.push({
-        role: "tool",
-        tool_call_id: call.id,
-        name: call.function.name,
-        content: result.content,
-      });
+      subAgentEvents.push(...subAgentBuffer);
 
       if (opts.hooks) {
         const post = await opts.hooks.run("PostToolUse", {
@@ -443,10 +526,71 @@ export async function* runAgent(opts: RunAgentOptions): AsyncGenerator<AgentEven
           cwd: opts.cwd,
           result: { content: result.content, ...(result.isError ? { isError: true } : {}) },
         });
-        for (const w of post.warnings) yield { type: "hook_warning", message: w };
-        for (const n of post.notices) yield { type: "hook_notice", message: n };
-        // PostToolUse cannot block — exit-2 is treated as a notice/warning.
+        for (const w of post.warnings) postEvents.push({ type: "hook_warning", message: w });
+        for (const n of post.notices) postEvents.push({ type: "hook_notice", message: n });
       }
+
+      return { preEvents, result, subAgentEvents, postEvents, denied: false };
+    };
+
+    // Wrap so the partial queue is ALWAYS closed regardless of which
+    // early-return path runOneInner takes — otherwise the drain loop's
+    // for-await on an open queue blocks forever and the agent loop deadlocks.
+    const runOne = async (call: AgentToolCall, queue: PartialQueue): Promise<CallOutcome> => {
+      try {
+        return await runOneInner(call, queue);
+      } finally {
+        queue.close();
+      }
+    };
+
+    // Schedule: read-only calls dispatch immediately (parallel); write/exec
+    // chain on the prior side-effect's completion to preserve happens-before.
+    let prevSideEffect: Promise<unknown> = Promise.resolve();
+    const handles: CallHandle[] = assistantMsg.tool_calls.map((call) => {
+      const queue = makePartialQueue();
+      const tool = opts.tools.get(call.function.name);
+      const isReadOnly = tool?.category === "read";
+      const partials = queue.drain();
+      if (isReadOnly) {
+        return { partials, outcome: runOne(call, queue) };
+      }
+      const outcome = prevSideEffect.then(() => runOne(call, queue));
+      prevSideEffect = outcome.catch(() => undefined);
+      return { partials, outcome };
+    });
+
+    // Drain in declaration order so events and the message array stay aligned.
+    // Within each call, yield tool_partial events as they arrive (the queue
+    // closes when the tool finishes, so the for-await terminates cleanly).
+    for (let i = 0; i < assistantMsg.tool_calls.length; i += 1) {
+      const call = assistantMsg.tool_calls[i]!;
+      const handle = handles[i]!;
+      for await (const partial of handle.partials) {
+        yield { type: "tool_partial", call_id: call.id, channel: partial.channel, content: partial.content };
+      }
+      const outcome = await handle.outcome;
+      for (const ev of outcome.preEvents) yield ev;
+      if (outcome.denied) {
+        yield { type: "tool_denied", call_id: call.id, name: call.function.name };
+      }
+      for (const ev of outcome.subAgentEvents) {
+        yield { type: "sub_agent_event", parentCallId: call.id, event: ev };
+      }
+      yield {
+        type: "tool_result",
+        call_id: call.id,
+        name: call.function.name,
+        result: outcome.result,
+        ...(outcome.result.display ? { display: outcome.result.display } : {}),
+      };
+      messages.push({
+        role: "tool",
+        tool_call_id: call.id,
+        name: call.function.name,
+        content: outcome.result.content,
+      });
+      for (const ev of outcome.postEvents) yield ev;
     }
     // Loop back: send tool results to the model.
   }

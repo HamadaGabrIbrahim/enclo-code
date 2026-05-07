@@ -25,7 +25,7 @@ export function createApiAdapter(opts: CreateAdapterOptions): ApiAdapter {
         messages: wireMessages,
         conversation_id: opts.conversationIdRef.current,
         stream: true,
-        temperature: opts.temperature ?? 0.7,
+        temperature: opts.temperature ?? 0.2,
         max_tokens: opts.maxTokens ?? 2048,
         tools: req.tools,
       };
@@ -48,6 +48,8 @@ async function* translate(
       convoRef.current = e.conversation_id;
     } else if (e.type === "delta") {
       yield { type: "delta", content: e.content };
+    } else if (e.type === "reasoning_delta") {
+      yield { type: "reasoning", content: e.content };
     } else if (e.type === "tool_call_delta") {
       const out: StreamEvent = { type: "tool_call_delta", index: e.index };
       if (e.id !== undefined) out.id = e.id;

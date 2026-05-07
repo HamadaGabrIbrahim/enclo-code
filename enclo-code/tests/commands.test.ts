@@ -61,6 +61,7 @@ describe("COMMANDS registry", () => {
         "mcp",
         "models",
         "plan",
+        "reasoning",
         "reload-agents",
         "reload-commands",
         "reload-context",

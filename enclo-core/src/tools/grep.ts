@@ -80,7 +80,13 @@ function globToRegex(glob: string): RegExp {
   for (let i = 0; i < glob.length; i += 1) {
     const ch = glob[i];
     if (ch === "*") {
-      if (glob[i + 1] === "*") {
+      // `**/` (or `/**/`) collapses to "zero or more path segments",
+      // i.e. it matches both `src/foo.ts` and `src/a/b/foo.ts` for
+      // a glob like `src/**/*.ts`. Trailing `**` is unconstrained.
+      if (glob[i + 1] === "*" && glob[i + 2] === "/") {
+        re += "(?:.*/)?";
+        i += 2;
+      } else if (glob[i + 1] === "*") {
         re += ".*";
         i += 1;
       } else {
@@ -136,7 +142,29 @@ async function nodeGrep(args: Args, cwd: string, searchPath: string): Promise<To
   if (stat.isFile()) {
     files.push(searchPath);
   } else {
-    for await (const f of walk(searchPath)) {
+    // If the user passed a glob with a literal prefix (e.g. `src/**/*.ts`),
+    // start the walk inside the prefix so we don't waste time descending
+    // into unrelated trees only to filter them out.
+    const walkRoot = (() => {
+      if (!args.glob) return searchPath;
+      const literal = args.glob.match(/^([^*?[{]+)/)?.[1] ?? "";
+      if (!literal) return searchPath;
+      const trimmed = literal.replace(/\/+$/, "");
+      if (!trimmed) return searchPath;
+      const candidate = path.join(searchPath, trimmed);
+      return candidate;
+    })();
+    let walkBase = walkRoot;
+    try {
+      const wStat = await fs.stat(walkRoot);
+      if (!wStat.isDirectory()) walkBase = path.dirname(walkRoot);
+    } catch {
+      // Prefix doesn't resolve — fall back to original searchPath rather
+      // than returning empty. The user's glob may include intentional
+      // wildcards in directory names.
+      walkBase = searchPath;
+    }
+    for await (const f of walk(walkBase)) {
       if (globRe) {
         const rel = path.relative(searchPath, f);
         if (!globRe.test(rel) && !globRe.test(path.basename(f))) continue;

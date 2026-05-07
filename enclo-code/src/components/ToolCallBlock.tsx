@@ -16,6 +16,12 @@ export interface ToolCallBlockProps {
   result?: ToolResult;
   display?: ToolDisplay;
   subAgentEvents?: SubAgentEventEntry[];
+  /**
+   * Live stdout/stderr accumulated from tool_partial events. Rendered in
+   * cyan/red below the headline while status === "pending"; once the call
+   * completes, `display` (with its full bash output) supersedes this.
+   */
+  partial?: { stdout: string; stderr: string };
 }
 
 const ICONS: Record<ToolStatus, string> = {
@@ -53,16 +59,24 @@ function summarize(name: string, args: unknown): string {
   }
 }
 
-export function ToolCallBlock({
+function ToolCallBlockImpl({
   name,
   args,
   status,
   result,
   display,
   subAgentEvents,
+  partial,
 }: ToolCallBlockProps): React.ReactElement {
-  const icon = ICONS[status];
-  const color = result?.isError ? "red" : COLORS[status];
+  // Treat a non-zero bash exit as an error even when the agent layer didn't
+  // surface result.isError — otherwise the user sees a green ✓ next to a
+  // command that actually failed.
+  const bashFailed =
+    display?.kind === "bash" && display.exitCode !== 0;
+  const isError = result?.isError === true || bashFailed;
+  // Iconography must match meaning: a green ✓ next to red text is contradictory.
+  const icon = isError ? ICONS.denied : ICONS[status];
+  const color = isError ? "red" : COLORS[status];
   const headline = summarize(name, args);
 
   return (
@@ -82,6 +96,16 @@ export function ToolCallBlock({
           ))}
         </Box>
       )}
+      {status === "pending" && partial && (partial.stdout.length > 0 || partial.stderr.length > 0) && (
+        <Box flexDirection="column" marginLeft={2}>
+          {partial.stdout.length > 0 && (
+            <Text color="cyan">{previewText(partial.stdout.trimEnd(), 20)}</Text>
+          )}
+          {partial.stderr.length > 0 && (
+            <Text color="red">{previewText(partial.stderr.trimEnd(), 10)}</Text>
+          )}
+        </Box>
+      )}
       {status === "done" && display && <DisplayBlock display={display} />}
       {status === "done" && !display && result?.content ? (
         <Box marginLeft={2}>
@@ -91,6 +115,20 @@ export function ToolCallBlock({
     </Box>
   );
 }
+
+export const ToolCallBlock = React.memo(
+  ToolCallBlockImpl,
+  (prev, next) =>
+    prev.status === next.status &&
+    prev.name === next.name &&
+    prev.args === next.args &&
+    prev.result === next.result &&
+    prev.display === next.display &&
+    prev.subAgentEvents === next.subAgentEvents &&
+    prev.partial === next.partial &&
+    (prev.partial?.stdout.length ?? 0) === (next.partial?.stdout.length ?? 0) &&
+    (prev.partial?.stderr.length ?? 0) === (next.partial?.stderr.length ?? 0),
+);
 
 function previewText(text: string, maxLines = 10): string {
   const lines = text.split("\n");

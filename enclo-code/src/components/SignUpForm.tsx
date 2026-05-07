@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Box, Text } from "ink";
 import TextInput from "ink-text-input";
 
@@ -19,6 +19,17 @@ export function SignUpForm({
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [stage, setStage] = useState<Stage>("email");
+  // After a failed submission, clear the password (typing into a masked field
+  // that already has stale chars is invisible). Keep email + display_name.
+  const sawErrorRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (error && !busy && sawErrorRef.current !== error) {
+      sawErrorRef.current = error;
+      setPassword("");
+      setStage("password");
+    }
+    if (!error) sawErrorRef.current = undefined;
+  }, [error, busy]);
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={1}>
@@ -74,7 +85,7 @@ export function SignUpForm({
       )}
       {error && (
         <Box marginTop={1}>
-          <Text color="red">{error}</Text>
+          <Text color="red">✗ {error}</Text>
         </Box>
       )}
     </Box>

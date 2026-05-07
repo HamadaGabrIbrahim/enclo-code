@@ -35,6 +35,7 @@ export {
   ErrorEnvelopeSchema,
   StartEventSchema,
   DeltaEventSchema,
+  ReasoningDeltaSchema,
   ToolCallDeltaSchema,
   EndEventSchema,
   StreamErrorEventSchema,

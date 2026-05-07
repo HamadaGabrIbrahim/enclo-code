@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
-import type { Tool, ToolResult, ToolContext } from "./types.js";
+import type { Tool, ToolResult, ToolContext, ToolPartialChunk } from "./types.js";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
 const MAX_OUTPUT_BYTES = 256 * 1024;
+
+export type BashPartialSink = (chunk: ToolPartialChunk) => void;
 
 interface Args {
   command: string;
@@ -35,39 +37,68 @@ interface RunResult {
   timedOut: boolean;
 }
 
-export function runBash(command: string, opts: { cwd: string; timeoutMs: number }): Promise<RunResult> {
+export function runBash(
+  command: string,
+  opts: { cwd: string; timeoutMs: number; onPartial?: BashPartialSink },
+): Promise<RunResult> {
   return new Promise((resolve) => {
     const child = spawn("/bin/sh", ["-lc", command], {
       cwd: opts.cwd,
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
     let stdout = "";
     let stderr = "";
     let stdoutBytes = 0;
     let stderrBytes = 0;
     let timedOut = false;
+    let settled = false;
+
+    const killGroup = (sig: NodeJS.Signals) => {
+      if (child.pid === undefined) return;
+      try {
+        process.kill(-child.pid, sig);
+      } catch {
+        try { child.kill(sig); } catch { /* already gone */ }
+      }
+    };
 
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      setTimeout(() => child.kill("SIGKILL"), 2000).unref();
+      killGroup("SIGTERM");
+      setTimeout(() => {
+        if (!settled) killGroup("SIGKILL");
+      }, 2000).unref();
     }, opts.timeoutMs);
 
+    const emitPartial = (channel: "stdout" | "stderr", text: string) => {
+      if (!opts.onPartial || text.length === 0) return;
+      try { opts.onPartial({ channel, content: text }); } catch { /* never break the child */ }
+    };
+
     child.stdout.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
       stdoutBytes += chunk.length;
-      if (stdoutBytes <= MAX_OUTPUT_BYTES) stdout += chunk.toString("utf8");
+      if (stdoutBytes <= MAX_OUTPUT_BYTES) stdout += text;
+      // Always emit partials so the user sees the line; the buffer cap is
+      // about what we send to the model, not what we render live.
+      emitPartial("stdout", text);
     });
     child.stderr.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
       stderrBytes += chunk.length;
-      if (stderrBytes <= MAX_OUTPUT_BYTES) stderr += chunk.toString("utf8");
+      if (stderrBytes <= MAX_OUTPUT_BYTES) stderr += text;
+      emitPartial("stderr", text);
     });
     child.on("error", (err) => {
       clearTimeout(timer);
+      settled = true;
       resolve({ stdout, stderr: stderr + `\n[spawn error: ${err.message}]`, exitCode: -1, timedOut });
     });
     child.on("close", (code, signal) => {
       clearTimeout(timer);
+      settled = true;
       const exitCode = code ?? (signal ? 128 : -1);
       if (stdoutBytes > MAX_OUTPUT_BYTES) {
         stdout += `\n[truncated — ${stdoutBytes - MAX_OUTPUT_BYTES} more bytes]`;
@@ -111,6 +142,7 @@ export const bash: Tool = {
     const result = await runBash(args.command, {
       cwd: ctx.cwd,
       timeoutMs: args.timeout ?? DEFAULT_TIMEOUT_MS,
+      onPartial: ctx.onPartial,
     });
     const lines: string[] = [];
     lines.push(`$ ${args.command}`);

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Box, Text } from "ink";
 import TextInput from "ink-text-input";
 
@@ -16,6 +16,18 @@ export function SignInForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [stage, setStage] = useState<"email" | "password">("email");
+  // After a failed submission (error appears while not busy), clear the
+  // password field and return focus to it so the user types fresh — appending
+  // to a masked buffer is invisible and confusing.
+  const sawErrorRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (error && !busy && sawErrorRef.current !== error) {
+      sawErrorRef.current = error;
+      setPassword("");
+      setStage("password");
+    }
+    if (!error) sawErrorRef.current = undefined;
+  }, [error, busy]);
 
   return (
     <Box flexDirection="column" paddingX={1} paddingY={1}>
@@ -56,7 +68,7 @@ export function SignInForm({
       )}
       {error && (
         <Box marginTop={1}>
-          <Text color="red">{error}</Text>
+          <Text color="red">✗ {error}</Text>
         </Box>
       )}
     </Box>

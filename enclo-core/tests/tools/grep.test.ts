@@ -41,4 +41,21 @@ describe("grep", () => {
     const r = await grep.execute({ pattern: "two", path: f }, { cwd: tmpDir });
     expect(r.content).toMatch(/line two/);
   });
+
+  it("short-circuits the walk to a glob's literal prefix", async () => {
+    // src/foo.ts hits; unrelated/deep/file.ts ALSO has the pattern but must
+    // not be visited because the glob prefix says only src/**/*.ts is
+    // relevant.
+    await fs.mkdir(path.join(tmpDir, "src"), { recursive: true });
+    await fs.mkdir(path.join(tmpDir, "unrelated", "deep"), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, "src", "foo.ts"), "needle here\n");
+    await fs.writeFile(path.join(tmpDir, "unrelated", "deep", "file.ts"), "needle hidden\n");
+    const r = await grep.execute(
+      { pattern: "needle", path: tmpDir, glob: "src/**/*.ts" },
+      { cwd: tmpDir },
+    );
+    expect(r.isError).not.toBe(true);
+    expect(r.content).toContain("foo.ts");
+    expect(r.content).not.toContain("unrelated");
+  });
 });

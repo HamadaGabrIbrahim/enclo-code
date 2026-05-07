@@ -264,4 +264,154 @@ describe("runAgent", () => {
     const err = events.find((e) => e.type === "agent_error");
     expect(err).toBeDefined();
   });
+
+  it("runs multiple read-only tool calls in parallel within a single turn", async () => {
+    // 3 read-only tool calls. Each tool sleeps for the same delay.
+    // If executed sequentially, total >= 3 * delay. If parallel, ~= delay.
+    const callDelayMs = 80;
+    const slowReadTool: Tool = {
+      category: "read",
+      requiresPermission: false,
+      definition: {
+        type: "function",
+        function: {
+          name: "slow_read",
+          description: "Sleeps then returns a value",
+          parameters: {
+            type: "object",
+            properties: { id: { type: "string" } },
+            required: ["id"],
+          },
+        },
+      },
+      async execute(args) {
+        await new Promise((r) => setTimeout(r, callDelayMs));
+        return { content: `read:${(args as { id: string }).id}` };
+      },
+    };
+
+    const { api } = fakeApi([
+      [
+        { type: "tool_call_delta", index: 0, id: "c1", name: "slow_read", arguments: '{"id":"a"}' },
+        { type: "tool_call_delta", index: 1, id: "c2", name: "slow_read", arguments: '{"id":"b"}' },
+        { type: "tool_call_delta", index: 2, id: "c3", name: "slow_read", arguments: '{"id":"c"}' },
+        { type: "end", finishReason: "tool_calls" },
+      ],
+      [
+        { type: "delta", content: "done" },
+        { type: "end", finishReason: "stop" },
+      ],
+    ]);
+
+    const t0 = Date.now();
+    const events = await collect(
+      runAgent({
+        api,
+        tools: makeRegistry([slowReadTool]),
+        permissions: createPermissionManager(),
+        cwd: "/tmp",
+        history: [],
+        userInput: "go",
+      }),
+    );
+    const elapsed = Date.now() - t0;
+
+    // Sequential would be >= 3 * 80 = 240ms. Parallel should land well under
+    // 200ms even with overhead. Use 200ms as a forgiving threshold.
+    expect(elapsed).toBeLessThan(200);
+
+    // Result events appear in declaration order regardless of parallelism.
+    const results = events.filter(
+      (e): e is Extract<AgentEvent, { type: "tool_result" }> => e.type === "tool_result",
+    );
+    expect(results.map((r) => r.call_id)).toEqual(["c1", "c2", "c3"]);
+    expect(results.map((r) => r.result.content)).toEqual(["read:a", "read:b", "read:c"]);
+  });
+
+  it("serializes write/exec tool calls so each observes the prior's effect", async () => {
+    // Counter shared across tool calls. If serialized, each call sees
+    // values 0, 1, 2 in order. If parallel, all three see 0 (race).
+    let counter = 0;
+    const observed: number[] = [];
+    const incTool: Tool = {
+      category: "write",
+      requiresPermission: false,
+      definition: {
+        type: "function",
+        function: {
+          name: "inc",
+          description: "Increment a counter and observe",
+          parameters: { type: "object", properties: {}, required: [] },
+        },
+      },
+      async execute() {
+        observed.push(counter);
+        // Yield to event loop to amplify any race.
+        await new Promise((r) => setTimeout(r, 10));
+        counter += 1;
+        return { content: `seen:${observed[observed.length - 1]}` };
+      },
+    };
+
+    const { api } = fakeApi([
+      [
+        { type: "tool_call_delta", index: 0, id: "c1", name: "inc", arguments: "{}" },
+        { type: "tool_call_delta", index: 1, id: "c2", name: "inc", arguments: "{}" },
+        { type: "tool_call_delta", index: 2, id: "c3", name: "inc", arguments: "{}" },
+        { type: "end", finishReason: "tool_calls" },
+      ],
+      [
+        { type: "delta", content: "done" },
+        { type: "end", finishReason: "stop" },
+      ],
+    ]);
+
+    await collect(
+      runAgent({
+        api,
+        tools: makeRegistry([incTool]),
+        permissions: createPermissionManager(),
+        cwd: "/tmp",
+        history: [],
+        userInput: "go",
+      }),
+    );
+
+    expect(observed).toEqual([0, 1, 2]);
+    expect(counter).toBe(3);
+  });
+
+  it("aborts the turn when no SSE event arrives within streamIdleTimeoutMs", async () => {
+    // Adapter that emits one event then never resolves.
+    const stallApi: ApiAdapter = {
+      async streamChat() {
+        return {
+          events: (async function* () {
+            yield { type: "delta", content: "tick" } satisfies StreamEvent;
+            await new Promise<void>(() => {
+              /* never resolves */
+            });
+          })(),
+        };
+      },
+    };
+
+    const events = await collect(
+      runAgent({
+        api: stallApi,
+        tools: makeRegistry([]),
+        permissions: createPermissionManager(),
+        cwd: "/tmp",
+        history: [],
+        userInput: "hi",
+        streamIdleTimeoutMs: 50,
+      }),
+    );
+
+    const err = events.find(
+      (e): e is Extract<AgentEvent, { type: "agent_error" }> => e.type === "agent_error",
+    );
+    expect(err).toBeDefined();
+    expect(err?.message).toMatch(/stream idle timeout/);
+  });
 });

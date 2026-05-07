@@ -48,9 +48,16 @@ export function HistoryPicker({
   );
 }
 
+// Long titles wrap onto a second line in ink-select-input, which detaches
+// the "❯" cursor marker from the visible row text. Cap at a reasonable width
+// so even narrow terminals keep the picker readable.
+const TITLE_MAX = 70;
+
 export function rowLabel(c: ConversationSummary): string {
   const date = formatShortDate(c.updated_at);
-  const title = (c.title ?? "(untitled)").trim() || "(untitled)";
+  const rawTitle = (c.title ?? "(untitled)").trim() || "(untitled)";
+  const title =
+    rawTitle.length > TITLE_MAX ? `${rawTitle.slice(0, TITLE_MAX - 1)}…` : rawTitle;
   const totalTokens =
     (c.total_prompt_tokens ?? 0) + (c.total_completion_tokens ?? 0);
   const tk =

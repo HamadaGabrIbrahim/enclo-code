@@ -333,6 +333,7 @@ export function runHook(
       cwd: payload.cwd,
       env: buildHookEnv(payload),
       stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     });
     let stdout = "";
     let stderr = "";
@@ -340,15 +341,20 @@ export function runHook(
     let timedOut = false;
     let settled = false;
 
+    const killGroup = (sig: NodeJS.Signals) => {
+      if (child.pid === undefined) return;
+      try {
+        process.kill(-child.pid, sig);
+      } catch {
+        try { child.kill(sig); } catch { /* already gone */ }
+      }
+    };
+
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      killGroup("SIGTERM");
       setTimeout(() => {
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          /* already dead */
-        }
+        if (!settled) killGroup("SIGKILL");
       }, 2000).unref();
     }, timeoutMs);
 

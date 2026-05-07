@@ -5,6 +5,8 @@ import TextInput from "ink-text-input";
 export interface InputProps {
   placeholder?: string;
   disabled?: boolean;
+  /** When true, swap the placeholder for a plan-mode-specific hint. */
+  planMode?: boolean;
   onSubmit: (line: string) => void;
   /**
    * Called when the user hits the platform paste shortcut (Cmd-V on macOS,
@@ -16,12 +18,22 @@ export interface InputProps {
 }
 
 export function Input({
-  placeholder = "Type a message, or /help",
+  placeholder,
   disabled = false,
+  planMode = false,
   onSubmit,
   onPasteShortcut,
 }: InputProps): React.ReactElement {
   const [value, setValue] = useState("");
+  // Mode-aware placeholder so the user knows which "shape" their next message
+  // takes: a slash command, a planning request (read-only), or a normal turn.
+  const effectivePlaceholder =
+    placeholder ??
+    (value.startsWith("/")
+      ? "Type a slash command — /help for the list"
+      : planMode
+        ? "Plan mode — describe a goal; no edits will be made"
+        : "Type a message, or /help");
 
   function handleSubmit(line: string): void {
     if (disabled) return;
@@ -51,7 +63,7 @@ export function Input({
         value={value}
         onChange={setValue}
         onSubmit={handleSubmit}
-        placeholder={placeholder}
+        placeholder={effectivePlaceholder}
         showCursor={!disabled}
       />
     </Box>

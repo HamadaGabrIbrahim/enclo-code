@@ -13,6 +13,13 @@ export interface ToolBlock {
   display?: ToolDisplay;
   /** For spawn_agent: nested events from the sub-agent. */
   subAgentEvents?: SubAgentEventEntry[];
+  /**
+   * Live stdout/stderr accumulated from tool_partial events while the
+   * tool is still running (or kept around briefly so the user sees the
+   * trail). Cleared once the final tool_result lands and display.kind
+   * already carries the authoritative output.
+   */
+  partial?: { stdout: string; stderr: string };
 }
 
 export interface SubAgentEventEntry {
@@ -27,7 +34,24 @@ export interface TextBlock {
   text: string;
 }
 
-export type AssistantBlock = TextBlock | ToolBlock;
+/**
+ * CoT/thinking stream from a reasoning model. Rendered in a distinct
+ * dim/italic pane so the user can tell it apart from the final answer.
+ * Not persisted as part of the assistant message.
+ *
+ * `collapsed` is set when real assistant_text starts arriving — the
+ * thinking pane folds to a one-line `[+ thinking (N chars)]` summary so
+ * the answer doesn't get pushed off-screen. Press `r` (reasoning) to
+ * toggle the most recent block back open.
+ */
+export interface ReasoningBlock {
+  kind: "reasoning";
+  id: string;
+  text: string;
+  collapsed?: boolean;
+}
+
+export type AssistantBlock = TextBlock | ToolBlock | ReasoningBlock;
 
 export interface RenderedMessage {
   id: string;
@@ -78,7 +102,7 @@ export function Chat({
   );
 }
 
-function MessageView({ message }: { message: RenderedMessage }): React.ReactElement {
+function MessageViewImpl({ message }: { message: RenderedMessage }): React.ReactElement {
   const { color, label } = roleStyle(message.role);
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -88,10 +112,32 @@ function MessageView({ message }: { message: RenderedMessage }): React.ReactElem
       </Text>
       {message.blocks && message.blocks.length > 0 ? (
         <Box flexDirection="column">
-          {message.blocks.map((block) =>
-            block.kind === "text" ? (
-              <Text key={block.id}>{block.text}</Text>
-            ) : (
+          {message.blocks.map((block) => {
+            if (block.kind === "text") {
+              return <Text key={block.id}>{block.text}</Text>;
+            }
+            if (block.kind === "reasoning") {
+              if (block.collapsed) {
+                return (
+                  <Box key={block.id} marginLeft={1}>
+                    <Text color="gray" dimColor italic>
+                      [+ thinking ({block.text.length} chars) — press r to expand]
+                    </Text>
+                  </Box>
+                );
+              }
+              return (
+                <Box key={block.id} marginLeft={1} flexDirection="column">
+                  <Text color="gray" dimColor italic>
+                    thinking…
+                  </Text>
+                  <Text color="gray" dimColor italic>
+                    {block.text}
+                  </Text>
+                </Box>
+              );
+            }
+            return (
               <ToolCallBlock
                 key={block.id}
                 name={block.name}
@@ -100,9 +146,10 @@ function MessageView({ message }: { message: RenderedMessage }): React.ReactElem
                 {...(block.result ? { result: block.result } : {})}
                 {...(block.display ? { display: block.display } : {})}
                 {...(block.subAgentEvents ? { subAgentEvents: block.subAgentEvents } : {})}
+                {...(block.partial ? { partial: block.partial } : {})}
               />
-            ),
-          )}
+            );
+          })}
         </Box>
       ) : (
         <Text>{message.content}</Text>
@@ -110,6 +157,20 @@ function MessageView({ message }: { message: RenderedMessage }): React.ReactElem
     </Box>
   );
 }
+
+const MessageView = React.memo(
+  MessageViewImpl,
+  (prev, next) => {
+    const a = prev.message;
+    const b = next.message;
+    if (a.id !== b.id || a.role !== b.role || a.pending !== b.pending) return false;
+    if (a.content !== b.content) return false;
+    // Blocks reference equality is enough — caller mutates in place by
+    // pushing new arrays on each flush.
+    if (a.blocks !== b.blocks) return false;
+    return true;
+  },
+);
 
 function roleStyle(role: ChatMessage["role"]): { color: string; label: string } {
   switch (role) {
@@ -119,5 +180,9 @@ function roleStyle(role: ChatMessage["role"]): { color: string; label: string } 
       return { color: "cyan", label: "enclo" };
     case "system":
       return { color: "gray", label: "system" };
+    case "tool":
+      return { color: "magenta", label: "tool" };
+    default:
+      return { color: "white", label: String(role) };
   }
 }

@@ -69,6 +69,7 @@ import {
   type AssistantBlock,
   type ToolBlock,
   type TextBlock,
+  type ReasoningBlock,
 } from "./components/Chat.js";
 import { Footer } from "./components/Footer.js";
 import { HistoryPicker } from "./components/HistoryPicker.js";
@@ -115,6 +116,7 @@ export function App({ config }: AppProps): React.ReactElement {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [chatBusy, setChatBusy] = useState(false);
   const [pendingPrompt, setPendingPrompt] = useState<PermPrompt | undefined>(undefined);
+  const [showHelpHint, setShowHelpHint] = useState(false);
   const [cwd, setCwd] = useState<string>(process.cwd());
   const [planMode, setPlanMode] = useState<boolean>(false);
   const [planExitConfirm, setPlanExitConfirm] = useState<boolean>(false);
@@ -220,6 +222,8 @@ export function App({ config }: AppProps): React.ReactElement {
   const pendingSystemRef = useRef<string | null>(null);
   /** True after a /compact failure — disables auto-compact for the rest of the session. */
   const compactDisabledRef = useRef<boolean>(false);
+  /** Stale-while-revalidate cache for /history so reopening is instant. */
+  const historyCacheRef = useRef<ConversationSummary[] | null>(null);
 
   const activeModel = useMemo(
     () =>
@@ -815,6 +819,29 @@ export function App({ config }: AppProps): React.ReactElement {
     { isActive: screen.kind === "chat" && !pendingPrompt },
   );
 
+  // Toggle the most-recent reasoning block (collapsed ↔ expanded). Hooked
+  // up to the `/reasoning` slash command rather than a bare keystroke so it
+  // doesn't conflict with normal text input.
+  const toggleLatestReasoning = useCallback(() => {
+    const msgs = messages;
+    for (let i = msgs.length - 1; i >= 0; i -= 1) {
+      const m = msgs[i];
+      if (m && m.role === "assistant" && m.blocks) {
+        for (let j = m.blocks.length - 1; j >= 0; j -= 1) {
+          const b = m.blocks[j];
+          if (b && b.kind === "reasoning") {
+            b.collapsed = !b.collapsed;
+            // setMessages with the new array reference so React re-renders.
+            setMessages([...msgs]);
+            setNotice(b.collapsed ? "Reasoning collapsed." : "Reasoning expanded.");
+            return;
+          }
+        }
+      }
+    }
+    setNotice("No reasoning block to toggle.");
+  }, [messages]);
+
   const handleTools = useCallback(() => {
     const lines = tools.list().map((t) => {
       const flag = t.requiresPermission ? "needs-permission" : "auto";
@@ -867,9 +894,20 @@ export function App({ config }: AppProps): React.ReactElement {
   );
 
   const handleHistory = useCallback(async () => {
-    setNotice("Loading conversations…");
+    // Render the cached list first (instant) so the picker isn't blank for
+    // the network roundtrip; the background fetch then refreshes the screen
+    // when it lands. Only network errors surface as a notice; if the cache
+    // is empty, fall through to the existing "Loading…" placeholder.
+    const cached = historyCacheRef.current;
+    if (cached && cached.length > 0) {
+      setScreen({ kind: "history_picker", conversations: cached });
+      setNotice("Refreshing conversations…");
+    } else {
+      setNotice("Loading conversations…");
+    }
     try {
       const conversations = await listConversations(client);
+      historyCacheRef.current = conversations;
       setNotice(undefined);
       setScreen({ kind: "history_picker", conversations });
     } catch (err) {
@@ -1125,6 +1163,9 @@ export function App({ config }: AppProps): React.ReactElement {
         case "tools":
           handleTools();
           return true;
+        case "reasoning":
+          toggleLatestReasoning();
+          return true;
         case "allow":
           await handleAllow(parsed.args);
           return true;
@@ -1296,6 +1337,7 @@ export function App({ config }: AppProps): React.ReactElement {
       const blocks: AssistantBlock[] = [];
       const blocksRef = { current: blocks };
       let activeText: TextBlock | null = null;
+      let activeReasoning: ReasoningBlock | null = null;
       const flushBlocks = (): void => {
         setStreamingBlocks([...blocksRef.current]);
       };
@@ -1343,14 +1385,32 @@ export function App({ config }: AppProps): React.ReactElement {
             }),
         })) {
           if (ev.type === "assistant_text") {
+            // A real answer chunk arrived — collapse the open thinking pane
+            // to a one-line summary so the answer isn't pushed off-screen.
+            // The user can still re-expand it by pressing `r`.
+            if (activeReasoning) {
+              activeReasoning.collapsed = true;
+              activeReasoning = null;
+            }
             if (!activeText) {
               activeText = { kind: "text", id: randomUUID(), text: "" };
               blocksRef.current.push(activeText);
             }
             activeText.text += ev.delta;
             flushBlocks();
+          } else if (ev.type === "assistant_reasoning") {
+            // Streaming CoT from a thinking model. Render in a dim/italic
+            // pane; do NOT add to assistant content (the loop already
+            // excludes it from the persisted message).
+            if (!activeReasoning) {
+              activeReasoning = { kind: "reasoning", id: randomUUID(), text: "" };
+              blocksRef.current.push(activeReasoning);
+            }
+            activeReasoning.text += ev.delta;
+            flushBlocks();
           } else if (ev.type === "tool_call_pending") {
             activeText = null;
+            activeReasoning = null;
             const tb: ToolBlock = {
               kind: "tool",
               id: ev.call.id,
@@ -1360,6 +1420,15 @@ export function App({ config }: AppProps): React.ReactElement {
             };
             blocksRef.current.push(tb);
             flushBlocks();
+          } else if (ev.type === "tool_partial") {
+            const tb = blocksRef.current.find(
+              (b) => b.kind === "tool" && b.id === ev.call_id,
+            ) as ToolBlock | undefined;
+            if (tb) {
+              if (!tb.partial) tb.partial = { stdout: "", stderr: "" };
+              tb.partial[ev.channel] += ev.content;
+              flushBlocks();
+            }
           } else if (ev.type === "tool_denied") {
             const tb = blocksRef.current.find(
               (b) => b.kind === "tool" && b.id === ev.call_id,
@@ -1406,7 +1475,7 @@ export function App({ config }: AppProps): React.ReactElement {
               { id: randomUUID(), role: "system", content: ev.message },
             ]);
           } else if (ev.type === "agent_error") {
-            setNotice(`agent error: ${ev.message}`);
+            setNotice(humanizeAgentError(ev.message));
           }
         }
 
@@ -1441,13 +1510,30 @@ export function App({ config }: AppProps): React.ReactElement {
     sendChatRef.current = sendChat;
   }, [sendChat]);
 
+  const dismissHelpHint = useCallback(() => {
+    setShowHelpHint(false);
+    if (cfg.help_hint_seen) return;
+    void config.update({ help_hint_seen: true }).catch(() => undefined);
+  }, [cfg.help_hint_seen, config]);
+
   const handleSubmit = useCallback(
     async (line: string) => {
+      if (showHelpHint) dismissHelpHint();
       if (await handleSlash(line)) return;
       await sendChat(line);
     },
-    [handleSlash, sendChat],
+    [dismissHelpHint, handleSlash, sendChat, showHelpHint],
   );
+
+  // First-run hint: show under the input when the user hasn't seen it yet.
+  // Auto-hides (and marks the config flag) after 8 s OR on the next submit.
+  useEffect(() => {
+    if (screen.kind !== "chat") return;
+    if (cfg.help_hint_seen) return;
+    setShowHelpHint(true);
+    const t = setTimeout(() => dismissHelpHint(), 8000);
+    return () => clearTimeout(t);
+  }, [screen.kind, cfg.help_hint_seen, dismissHelpHint]);
 
   // ----- render -----
   if (screen.kind === "loading") {
@@ -1542,6 +1628,7 @@ export function App({ config }: AppProps): React.ReactElement {
         apiUrl={cfg.api_url}
         activeModel={cfg.active_model}
         planMode={planMode}
+        streaming={streamingBlocks !== undefined}
       />
       <Chat messages={messages} streamingBlocks={streamingBlocks} notice={notice} />
       <Footer
@@ -1572,7 +1659,14 @@ export function App({ config }: AppProps): React.ReactElement {
               ))}
             </Box>
           )}
-          <Input onSubmit={handleSubmit} disabled={chatBusy} onPasteShortcut={handleClipboardPaste} />
+          <Input onSubmit={handleSubmit} disabled={chatBusy} planMode={planMode} onPasteShortcut={handleClipboardPaste} />
+          {showHelpHint && (
+            <Box paddingX={1}>
+              <Text color="gray" dimColor>
+                tip: /help for the command list · /history to revisit a chat · /reasoning to fold a thinking pane
+              </Text>
+            </Box>
+          )}
         </Box>
       )}
     </Box>
@@ -1584,6 +1678,35 @@ function formatError(err: unknown): string {
   if (err instanceof ApiError) return `${err.code} (${err.status}): ${err.message}`;
   if (err instanceof Error) return err.message;
   return String(err);
+}
+
+/**
+ * Translate raw agent error messages into something the user can act on. We
+ * specifically catch the common networking failures because the unadorned
+ * "fetch failed" / ECONNREFUSED messages bubble up otherwise and read as
+ * scary internals to a user who just wants to know the server is down.
+ */
+function humanizeAgentError(msg: string): string {
+  const m = String(msg);
+  if (/fetch failed|ECONNREFUSED|ECONNRESET|socket hang up|network error/i.test(m)) {
+    return "Cannot reach the enclo-api server — check that it's running, then send your message again.";
+  }
+  if (/ENOTFOUND|getaddrinfo/i.test(m)) {
+    return "API URL doesn't resolve — check the host name in your config (try /signout to set it again).";
+  }
+  if (/timed?out|timeout/i.test(m)) {
+    return "Request timed out — the model or server is slow. Try a smaller request or a different model.";
+  }
+  if (/upstream returned 404|model.*not found/i.test(m)) {
+    return "The selected model isn't pulled on the server — pull it (e.g. `ollama pull <model>`) and try again, or pick a different model with /models.";
+  }
+  if (/upstream returned 5\d\d/i.test(m)) {
+    return "The model server returned an error — check its logs and try again.";
+  }
+  if (/401|unauthor/i.test(m)) {
+    return "Your session expired — run /signin to log back in.";
+  }
+  return `agent error: ${m}`;
 }
 
 function safeJson(s: string): unknown {

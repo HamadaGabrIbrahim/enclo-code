@@ -45,6 +45,18 @@ export interface ToolContext {
    * need them can ignore the field.
    */
   agent?: AgentToolHooks;
+  /**
+   * Optional callback for incremental output. Long-running tools (notably
+   * bash) call this as stdout/stderr arrive so the TUI can display live
+   * progress instead of a blank pause until completion. Wire-level only —
+   * the final ToolResult.content remains authoritative for the model.
+   */
+  onPartial?: (chunk: ToolPartialChunk) => void;
+}
+
+export interface ToolPartialChunk {
+  channel: "stdout" | "stderr";
+  content: string;
 }
 
 /**

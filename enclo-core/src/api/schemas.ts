@@ -71,13 +71,13 @@ export const ToolCallSchema = z.object({
  * role="tool" carry `tool_call_id` and `name`.
  */
 export const StoredMessageSchema = z.object({
-  id: z.string().optional(),
+  id: z.string().nullable().optional(),
   role: z.enum(["system", "user", "assistant", "tool"]),
   content: ChatMessageContentSchema,
-  created_at: z.string().optional(),
-  tool_calls: z.array(ToolCallSchema).optional(),
-  tool_call_id: z.string().optional(),
-  name: z.string().optional(),
+  created_at: z.string().nullable().optional(),
+  tool_calls: z.array(ToolCallSchema).nullable().optional(),
+  tool_call_id: z.string().nullable().optional(),
+  name: z.string().nullable().optional(),
 });
 export type StoredMessage = z.infer<typeof StoredMessageSchema>;
 
@@ -88,8 +88,8 @@ export const ConversationSummarySchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
   message_count: z.number().int().nonnegative(),
-  total_prompt_tokens: z.number().int().nonnegative().optional(),
-  total_completion_tokens: z.number().int().nonnegative().optional(),
+  total_prompt_tokens: z.number().int().nonnegative().nullable().optional(),
+  total_completion_tokens: z.number().int().nonnegative().nullable().optional(),
 });
 export type ConversationSummary = z.infer<typeof ConversationSummarySchema>;
 
@@ -102,8 +102,8 @@ export const ConversationDetailSchema = z.object({
   title: z.string().nullable().optional(),
   model: z.string(),
   messages: z.array(StoredMessageSchema),
-  total_prompt_tokens: z.number().int().nonnegative().optional(),
-  total_completion_tokens: z.number().int().nonnegative().optional(),
+  total_prompt_tokens: z.number().int().nonnegative().nullable().optional(),
+  total_completion_tokens: z.number().int().nonnegative().nullable().optional(),
 });
 export type ConversationDetail = z.infer<typeof ConversationDetailSchema>;
 
@@ -144,6 +144,16 @@ export const DeltaEventSchema = z.object({
 });
 
 /**
+ * Streamed reasoning/CoT delta from thinking models (qwen3, deepseek-r1,
+ * o1-style). Surfaced as a distinct channel so the client can render it
+ * in a "thinking" pane and exclude it from saved assistant content.
+ */
+export const ReasoningDeltaSchema = z.object({
+  type: z.literal("reasoning_delta"),
+  content: z.string(),
+});
+
+/**
  * Streamed function-call delta. The server may emit several of these per
  * turn — one per tool call, possibly multiple times per call as the model
  * accumulates the JSON arguments. `index` identifies the call within the turn.
@@ -175,6 +185,7 @@ export const StreamErrorEventSchema = z.object({
 export const StreamEventSchema = z.discriminatedUnion("type", [
   StartEventSchema,
   DeltaEventSchema,
+  ReasoningDeltaSchema,
   ToolCallDeltaSchema,
   EndEventSchema,
   StreamErrorEventSchema,

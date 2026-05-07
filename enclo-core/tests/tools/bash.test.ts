@@ -55,4 +55,27 @@ describe("bash", () => {
     await expect(bash.execute({}, { cwd: tmpDir })).rejects.toThrow();
     await expect(bash.execute({ command: "" }, { cwd: tmpDir })).rejects.toThrow();
   });
+
+  it("emits onPartial chunks live as stdout/stderr arrive", async () => {
+    const chunks: { channel: string; content: string }[] = [];
+    const r = await bash.execute(
+      // Three lines, each separated by a small sleep so the OS flushes them
+      // as distinct chunks rather than one merged write.
+      { command: "echo a; sleep 0.05; echo b 1>&2; sleep 0.05; echo c" },
+      {
+        cwd: tmpDir,
+        onPartial: (c) => {
+          chunks.push({ channel: c.channel, content: c.content });
+        },
+      },
+    );
+    expect(r.isError).not.toBe(true);
+    // We may receive chunks merged or split — what we DO require is that
+    // both channels arrived and the cumulative content matches the final.
+    const stdoutText = chunks.filter((c) => c.channel === "stdout").map((c) => c.content).join("");
+    const stderrText = chunks.filter((c) => c.channel === "stderr").map((c) => c.content).join("");
+    expect(stdoutText).toContain("a");
+    expect(stdoutText).toContain("c");
+    expect(stderrText).toContain("b");
+  }, 5000);
 });

@@ -38,7 +38,7 @@ export function FirstRun({
         </Box>
         {error && (
           <Box marginTop={1}>
-            <Text color="red">{error}</Text>
+            <Text color="red">✗ {error}</Text>
           </Box>
         )}
       </Box>

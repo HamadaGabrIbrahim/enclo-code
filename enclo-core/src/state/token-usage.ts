@@ -92,10 +92,19 @@ export function computeCostUsd(
   );
 }
 
-/** "12,345" — group thousands with commas. */
+/**
+ * Compact token-count formatter for the footer:
+ *   < 10_000      → "1,234"
+ *   < 1_000_000   → "12.3k"
+ *   ≥ 1_000_000   → "1.2M"
+ * Round half-down to keep visual width stable as the count climbs.
+ */
 export function formatTokenCount(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "0";
-  return Math.round(n).toLocaleString("en-US");
+  const v = Math.round(n);
+  if (v < 10_000) return v.toLocaleString("en-US");
+  if (v < 1_000_000) return `${(v / 1_000).toFixed(1).replace(/\.0$/, "")}k`;
+  return `${(v / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
 }
 
 /** "$1.23" / "$0.0023" — pick a sensible precision for tiny numbers. */

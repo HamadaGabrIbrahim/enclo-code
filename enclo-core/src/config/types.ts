@@ -24,6 +24,12 @@ export const ConfigSchema = z.object({
    */
   cost_per_million_prompt_tokens: z.number().nonnegative().optional(),
   cost_per_million_completion_tokens: z.number().nonnegative().optional(),
+  /**
+   * Set to true after the user has seen (and dismissed) the first-run
+   * /help discovery hint. Stops the banner from re-appearing on every
+   * launch.
+   */
+  help_hint_seen: z.boolean().optional(),
 });
 
 export type EncloConfig = z.infer<typeof ConfigSchema>;
