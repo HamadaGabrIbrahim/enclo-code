@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Tool, ToolResult, ToolContext } from "./types.js";
+import { readPathArg } from "./_args.js";
 
 interface Args {
   path: string;
@@ -12,13 +13,14 @@ function parseArgs(raw: unknown): Args {
     throw new Error("write_file: expected object arguments");
   }
   const obj = raw as Record<string, unknown>;
-  if (typeof obj["path"] !== "string" || obj["path"].length === 0) {
-    throw new Error("write_file: 'path' must be a non-empty string");
+  const p = readPathArg(obj);
+  if (p === undefined) {
+    throw new Error("write_file: 'path' must be a non-empty string (alias accepted: file_path)");
   }
   if (typeof obj["content"] !== "string") {
     throw new Error("write_file: 'content' must be a string");
   }
-  return { path: obj["path"], content: obj["content"] };
+  return { path: p, content: obj["content"] };
 }
 
 export const writeFile: Tool = {

@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Tool, ToolResult, ToolContext } from "./types.js";
+import { readPathArg } from "./_args.js";
 
 interface Args {
   pattern: string;
@@ -19,7 +20,8 @@ function parseArgs(raw: unknown): Args {
     throw new Error("glob: 'pattern' must be a non-empty string");
   }
   const args: Args = { pattern: obj["pattern"] };
-  if (typeof obj["path"] === "string") args.path = obj["path"];
+  const p = readPathArg(obj);
+  if (p !== undefined) args.path = p;
   return args;
 }
 

@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Tool, ToolResult, ToolContext } from "./types.js";
+import { readPathArg } from "./_args.js";
 
 const MAX_LINES = 2000;
 const MAX_LINE_LENGTH = 2000;
@@ -16,10 +17,11 @@ function parseArgs(raw: unknown): Args {
     throw new Error("read_file: expected object arguments");
   }
   const obj = raw as Record<string, unknown>;
-  if (typeof obj["path"] !== "string" || obj["path"].length === 0) {
-    throw new Error("read_file: 'path' must be a non-empty string");
+  const p = readPathArg(obj);
+  if (p === undefined) {
+    throw new Error("read_file: 'path' must be a non-empty string (alias accepted: file_path)");
   }
-  const args: Args = { path: obj["path"] };
+  const args: Args = { path: p };
   if (obj["offset"] !== undefined) {
     if (typeof obj["offset"] !== "number" || obj["offset"] < 0) {
       throw new Error("read_file: 'offset' must be a non-negative number");

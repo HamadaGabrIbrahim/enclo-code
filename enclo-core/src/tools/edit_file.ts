@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Tool, ToolResult, ToolContext } from "./types.js";
+import { readPathArg } from "./_args.js";
 
 interface Args {
   path: string;
@@ -14,8 +15,9 @@ function parseArgs(raw: unknown): Args {
     throw new Error("edit_file: expected object arguments");
   }
   const obj = raw as Record<string, unknown>;
-  if (typeof obj["path"] !== "string" || obj["path"].length === 0) {
-    throw new Error("edit_file: 'path' must be a non-empty string");
+  const p = readPathArg(obj);
+  if (p === undefined) {
+    throw new Error("edit_file: 'path' must be a non-empty string (alias accepted: file_path)");
   }
   if (typeof obj["old_string"] !== "string") {
     throw new Error("edit_file: 'old_string' must be a string");
@@ -24,7 +26,7 @@ function parseArgs(raw: unknown): Args {
     throw new Error("edit_file: 'new_string' must be a string");
   }
   return {
-    path: obj["path"],
+    path: p,
     old_string: obj["old_string"],
     new_string: obj["new_string"],
     replace_all: obj["replace_all"] === true,

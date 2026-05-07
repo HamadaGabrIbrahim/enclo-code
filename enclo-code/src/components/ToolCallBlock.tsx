@@ -40,21 +40,39 @@ const COLORS: Record<ToolStatus, string> = {
 function summarize(name: string, args: unknown): string {
   if (!args || typeof args !== "object") return name;
   const obj = args as Record<string, unknown>;
+  // Tolerate the same path-arg aliases the tools accept at parse time so
+  // the headline reads correctly even when the model emits `file_path`.
+  const pickPath = (): string | undefined => {
+    for (const k of ["path", "file_path", "filepath", "filename", "file"]) {
+      const v = obj[k];
+      if (typeof v === "string" && v.length > 0) return v;
+    }
+    return undefined;
+  };
+  const pickCmd = (): string | undefined => {
+    for (const k of ["command", "cmd", "bash_command"]) {
+      const v = obj[k];
+      if (typeof v === "string" && v.length > 0) return v;
+    }
+    return undefined;
+  };
   switch (name) {
     case "read_file":
-      return `Reading ${obj["path"]}`;
+      return `Reading ${pickPath() ?? "(no path)"}`;
     case "write_file":
-      return `Writing ${obj["path"]}`;
+      return `Writing ${pickPath() ?? "(no path)"}`;
     case "edit_file":
-      return `Editing ${obj["path"]}`;
-    case "bash":
-      return typeof obj["command"] === "string" ? `Running: ${obj["command"]}` : "Running command";
+      return `Editing ${pickPath() ?? "(no path)"}`;
+    case "bash": {
+      const cmd = pickCmd();
+      return cmd ? `Running: ${cmd}` : "Running command";
+    }
     case "grep":
       return `Searching for ${JSON.stringify(obj["pattern"])}`;
     case "glob":
       return `Globbing ${JSON.stringify(obj["pattern"])}`;
     case "list_dir":
-      return `Listing ${obj["path"]}`;
+      return `Listing ${pickPath() ?? "(no path)"}`;
     default:
       return name;
   }

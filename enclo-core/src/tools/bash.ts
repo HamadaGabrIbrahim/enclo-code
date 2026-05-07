@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { Tool, ToolResult, ToolContext, ToolPartialChunk } from "./types.js";
+import { readCommandArg } from "./_args.js";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_TIMEOUT_MS = 600_000;
@@ -17,10 +18,11 @@ function parseArgs(raw: unknown): Args {
     throw new Error("bash: expected object arguments");
   }
   const obj = raw as Record<string, unknown>;
-  if (typeof obj["command"] !== "string" || obj["command"].length === 0) {
-    throw new Error("bash: 'command' must be a non-empty string");
+  const cmd = readCommandArg(obj);
+  if (cmd === undefined) {
+    throw new Error("bash: 'command' must be a non-empty string (alias accepted: cmd)");
   }
-  const args: Args = { command: obj["command"] };
+  const args: Args = { command: cmd };
   if (obj["timeout"] !== undefined) {
     if (typeof obj["timeout"] !== "number" || obj["timeout"] <= 0) {
       throw new Error("bash: 'timeout' must be a positive number (milliseconds)");

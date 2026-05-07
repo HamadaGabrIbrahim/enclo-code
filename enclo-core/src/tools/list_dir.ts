@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Tool, ToolResult, ToolContext } from "./types.js";
+import { readPathArg } from "./_args.js";
 
 interface Args {
   path: string;
@@ -11,9 +12,9 @@ function parseArgs(raw: unknown): Args {
     throw new Error("list_dir: expected object arguments");
   }
   const obj = raw as Record<string, unknown>;
-  const p = obj["path"];
-  if (typeof p !== "string" || p.length === 0) {
-    throw new Error("list_dir: 'path' must be a non-empty string");
+  const p = readPathArg(obj);
+  if (p === undefined) {
+    throw new Error("list_dir: 'path' must be a non-empty string (alias accepted: file_path)");
   }
   return { path: p };
 }

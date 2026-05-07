@@ -50,4 +50,36 @@ describe("write_file", () => {
       writeFile.execute({ path: "x", content: 5 }, { cwd: tmpDir }),
     ).rejects.toThrow();
   });
+
+  it("accepts 'file_path' as an alias for 'path' (model alias tolerance)", async () => {
+    const file = path.join(tmpDir, "alias.txt");
+    const r = await writeFile.execute(
+      { file_path: file, content: "via alias" },
+      { cwd: tmpDir },
+    );
+    expect(r.isError).not.toBe(true);
+    expect(await fs.readFile(file, "utf8")).toBe("via alias");
+  });
+
+  it("accepts 'filename' as an alias too", async () => {
+    const file = path.join(tmpDir, "fn.txt");
+    const r = await writeFile.execute(
+      { filename: file, content: "via filename" },
+      { cwd: tmpDir },
+    );
+    expect(r.isError).not.toBe(true);
+    expect(await fs.readFile(file, "utf8")).toBe("via filename");
+  });
+
+  it("error message names 'path' as canonical and mentions the alias", async () => {
+    let err: Error | undefined;
+    try {
+      await writeFile.execute({ content: "x" }, { cwd: tmpDir });
+    } catch (e) {
+      err = e as Error;
+    }
+    expect(err).toBeDefined();
+    expect(err!.message).toContain("'path'");
+    expect(err!.message).toContain("file_path");
+  });
 });
