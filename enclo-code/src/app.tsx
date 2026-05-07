@@ -125,6 +125,21 @@ export function App({ config }: AppProps): React.ReactElement {
   const [customCommands, setCustomCommands] = useState<Map<string, CustomCommand>>(
     () => new Map(),
   );
+  // Flat list passed to <Input> for slash autocomplete. Recomputed when
+  // either source changes; keys clash favor the custom one (matches the
+  // dispatch order in handleSlash).
+  const slashSuggestions = useMemo(() => {
+    const merged = new Map<string, { name: string; description?: string }>();
+    for (const c of COMMANDS) merged.set(c.name, { name: c.name, description: c.description });
+    for (const c of customCommands.values()) {
+      const hint = c.argumentHint ? ` ${c.argumentHint}` : "";
+      merged.set(c.name, {
+        name: c.name,
+        description: `${c.description ?? ""}${hint}`.trim() || undefined,
+      });
+    }
+    return [...merged.values()];
+  }, [customCommands]);
   const [customSubagents, setCustomSubagents] = useState<Map<string, CustomSubagent>>(
     () => new Map(),
   );
@@ -1659,7 +1674,13 @@ export function App({ config }: AppProps): React.ReactElement {
               ))}
             </Box>
           )}
-          <Input onSubmit={handleSubmit} disabled={chatBusy} planMode={planMode} onPasteShortcut={handleClipboardPaste} />
+          <Input
+            onSubmit={handleSubmit}
+            disabled={chatBusy}
+            planMode={planMode}
+            onPasteShortcut={handleClipboardPaste}
+            commands={slashSuggestions}
+          />
           {showHelpHint && (
             <Box paddingX={1}>
               <Text color="gray" dimColor>

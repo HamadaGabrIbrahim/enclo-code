@@ -74,4 +74,94 @@ describe("Input", () => {
     await press(stdin, "\x16"); // Ctrl+V
     expect(onPasteShortcut).toHaveBeenCalled();
   });
+
+  describe("slash autocomplete", () => {
+    const cmds = [
+      { name: "models", description: "List models" },
+      { name: "model-picker", description: "open the model picker" },
+      { name: "help", description: "Show help" },
+      { name: "history", description: "Resume a conversation" },
+      { name: "exit", description: "Quit" },
+    ];
+
+    it("shows all commands when value is just '/'", async () => {
+      const { stdin, lastFrame } = render(<Input onSubmit={() => {}} commands={cmds} />);
+      await settle();
+      await type(stdin, "/");
+      const frame = stripAnsi(lastFrame() ?? "");
+      expect(frame).toContain("/exit");
+      expect(frame).toContain("/help");
+      expect(frame).toContain("/history");
+      expect(frame).toContain("/models");
+      expect(frame).toContain("tab: complete");
+      await captureFrame("Input-slash-suggestions", lastFrame());
+    });
+
+    it("filters by prefix as the user types", async () => {
+      const { stdin, lastFrame } = render(<Input onSubmit={() => {}} commands={cmds} />);
+      await settle();
+      await type(stdin, "/mo");
+      const frame = stripAnsi(lastFrame() ?? "");
+      expect(frame).toContain("/models");
+      expect(frame).toContain("/model-picker");
+      expect(frame).not.toContain("/help");
+      expect(frame).not.toContain("/exit");
+    });
+
+    it("hides suggestions once the user types a space (typing args)", async () => {
+      const { stdin, lastFrame } = render(<Input onSubmit={() => {}} commands={cmds} />);
+      await settle();
+      await type(stdin, "/help foo");
+      const frame = stripAnsi(lastFrame() ?? "");
+      expect(frame).not.toContain("tab: complete");
+    });
+
+    it("Tab completes to the highlighted suggestion + a trailing space", async () => {
+      const onSubmit = vi.fn();
+      const { stdin, lastFrame } = render(
+        <Input onSubmit={onSubmit} commands={cmds} />,
+      );
+      await settle();
+      await type(stdin, "/his");
+      // single match → /history is selected by default at idx 0
+      await press(stdin, "\t");
+      // After tab the picker should hide (query no longer needs picking)
+      // and the buffer should hold "/history ". Trailing whitespace isn't
+      // visible at end-of-line in ink frames, so verify via submit instead.
+      const frame = stripAnsi(lastFrame() ?? "");
+      expect(frame).toContain("/history");
+      await press(stdin, "\r");
+      expect(onSubmit).toHaveBeenCalledWith("/history ");
+    });
+
+    it("Down arrow cycles suggestions, then Tab completes the chosen one", async () => {
+      const onSubmit = vi.fn();
+      const { stdin } = render(
+        <Input onSubmit={onSubmit} commands={cmds} />,
+      );
+      await settle();
+      await type(stdin, "/h");
+      // /help and /history match. Down once → /history highlighted.
+      await press(stdin, "\x1b[B"); // Down arrow
+      await press(stdin, "\t");
+      await press(stdin, "\r");
+      expect(onSubmit).toHaveBeenCalledWith("/history ");
+    });
+
+    it("Esc dismisses the picker but keeps the typed value", async () => {
+      const { stdin, lastFrame } = render(
+        <Input onSubmit={() => {}} commands={cmds} />,
+      );
+      await settle();
+      await type(stdin, "/he");
+      const before = stripAnsi(lastFrame() ?? "");
+      expect(before).toContain("/help");
+      expect(before).toContain("tab: complete");
+      await press(stdin, "\x1b"); // Esc
+      const after = stripAnsi(lastFrame() ?? "");
+      expect(after).not.toContain("tab: complete");
+      // Typed value still visible.
+      expect(after).toContain("/he");
+    });
+  });
 });
