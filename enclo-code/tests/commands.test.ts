@@ -67,10 +67,13 @@ describe("COMMANDS registry", () => {
         "reload-context",
         "reload-hooks",
         "reload-mcp",
+        "reload-skills",
         "resume",
         "signin",
         "signout",
         "signup",
+        "skill",
+        "skills",
         "tools",
       ].sort(),
     );

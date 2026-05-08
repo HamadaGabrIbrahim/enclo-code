@@ -17,7 +17,9 @@ import {
   getConversation,
   listConversations,
   applyCustomCommand,
+  applyCustomSkill,
   discoverCustomCommands,
+  discoverCustomSkills,
   discoverCustomSubagents,
   EMPTY_USAGE,
   addUsage,
@@ -26,6 +28,7 @@ import {
   builtInRegistry,
   combinedRegistry,
   createSpawnAgentTool,
+  createSkillTool,
   makeRegistry,
   McpManager,
   loadMcpConfig,
@@ -44,6 +47,7 @@ import {
   createHooksManager,
   HOOK_EVENTS,
   type CustomCommand,
+  type CustomSkill,
   type CustomSubagent,
   type ConversationSummary,
   type Model,
@@ -143,6 +147,9 @@ export function App({ config }: AppProps): React.ReactElement {
   const [customSubagents, setCustomSubagents] = useState<Map<string, CustomSubagent>>(
     () => new Map(),
   );
+  const [customSkills, setCustomSkills] = useState<Map<string, CustomSkill>>(
+    () => new Map(),
+  );
   const customShadowWarnedRef = useRef<boolean>(false);
   /**
    * Forward reference to sendChat so the (earlier-declared) handleSlash
@@ -184,16 +191,20 @@ export function App({ config }: AppProps): React.ReactElement {
   const tools = useMemo(() => {
     const mgr = mcpManagerRef.current;
     const dynamicSpawn = createSpawnAgentTool(subagentSpecs);
+    const dynamicSkill = createSkillTool(customSkills);
     const base = mgr ? combinedRegistry(mgr.getTools()) : builtInRegistry();
     // Replace the static spawn_agent with one whose description lists
     // the currently-registered custom subagents.
     const swapped = base
       .list()
       .map((t) => (t.definition.function.name === "spawn_agent" ? dynamicSpawn : t));
+    // Skill tool only exists when the user has skills defined — otherwise
+    // it'd be an empty enum that just confuses the model.
+    if (dynamicSkill) swapped.push(dynamicSkill);
     return makeRegistry(swapped);
     // mcpToolsTick is the dependency that signals "MCP tools changed".
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mcpToolsTick, subagentSpecs]);
+  }, [mcpToolsTick, subagentSpecs, customSkills]);
   const permissions = useMemo(
     () =>
       createPermissionManager({
@@ -314,6 +325,18 @@ export function App({ config }: AppProps): React.ReactElement {
     void (async () => {
       const found = await discoverCustomSubagents(cwd);
       if (!cancelled) setCustomSubagents(found);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cwd]);
+
+  // Auto-discover custom skills whenever cwd changes.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const found = await discoverCustomSkills(cwd);
+      if (!cancelled) setCustomSkills(found);
     })();
     return () => {
       cancelled = true;
@@ -1018,6 +1041,57 @@ export function App({ config }: AppProps): React.ReactElement {
     );
   }, [cwd]);
 
+  const handleSkills = useCallback(() => {
+    if (customSkills.size === 0) {
+      setNotice(
+        "No skills found under .enclo/skills/. Add a markdown file there with frontmatter (name, description, allowed-tools, model). The agent can then call the Skill tool, or you can run /skill <name>.",
+      );
+      return;
+    }
+    const lines = ["Registered skills:"];
+    for (const skill of customSkills.values()) {
+      const tools = skill.allowedTools ? ` [tools: ${skill.allowedTools.join(", ")}]` : "";
+      const model = skill.model ? ` [model: ${skill.model}]` : "";
+      lines.push(`  ${skill.name} — ${skill.description}${tools}${model}`);
+    }
+    setNotice(lines.join("\n"));
+  }, [customSkills]);
+
+  const handleReloadSkills = useCallback(async () => {
+    const found = await discoverCustomSkills(cwd);
+    setCustomSkills(found);
+    setNotice(
+      found.size > 0
+        ? `Reloaded ${found.size} skill(s): ${[...found.keys()].join(", ")}`
+        : "No skills found under .enclo/skills/.",
+    );
+  }, [cwd]);
+
+  const handleSkill = useCallback(
+    async (args: string[]) => {
+      const name = args[0]?.trim().toLowerCase();
+      if (!name) {
+        setNotice("/skill: usage: /skill <name> [args]");
+        return;
+      }
+      const skill = customSkills.get(name);
+      if (!skill) {
+        const available = [...customSkills.keys()].join(", ") || "(none registered)";
+        setNotice(`/skill: unknown skill "${name}". Available: ${available}`);
+        return;
+      }
+      const argText = args.slice(1).join(" ");
+      const applied = applyCustomSkill(skill, argText, cwd);
+      const chatOpts: { modelOverride?: string; allowedToolsOverride?: string[] } = {};
+      if (applied.modelOverride) chatOpts.modelOverride = applied.modelOverride;
+      if (applied.allowedToolsOverride) {
+        chatOpts.allowedToolsOverride = applied.allowedToolsOverride;
+      }
+      await sendChatRef.current(applied.prompt, chatOpts);
+    },
+    [customSkills, cwd],
+  );
+
   const handleHooks = useCallback(() => {
     if (!hooks) {
       setNotice("Hooks not loaded yet.");
@@ -1231,6 +1305,15 @@ export function App({ config }: AppProps): React.ReactElement {
         case "reload-agents":
           await handleReloadAgents();
           return true;
+        case "skills":
+          handleSkills();
+          return true;
+        case "reload-skills":
+          await handleReloadSkills();
+          return true;
+        case "skill":
+          await handleSkill(parsed.args);
+          return true;
         default:
           // Unknown built-in name (e.g. a parallel feature added a name
           // to the registry but no handler here yet). Fall through so the
@@ -1255,7 +1338,10 @@ export function App({ config }: AppProps): React.ReactElement {
       handleReloadContext,
       handleReloadHooks,
       handleReloadMcp,
+      handleReloadSkills,
       handleResume,
+      handleSkill,
+      handleSkills,
       handleTools,
       openModelPicker,
       runSignout,
@@ -1353,10 +1439,26 @@ export function App({ config }: AppProps): React.ReactElement {
       const blocksRef = { current: blocks };
       let activeText: TextBlock | null = null;
       let activeReasoning: ReasoningBlock | null = null;
-      const flushBlocks = (): void => {
+      // Coalesce high-frequency token flushes into ~30 Hz so the terminal
+      // doesn't redraw the whole tree on every delta — that's what was
+      // making streaming text shake. Structural events bypass via flushNow.
+      let flushTimer: ReturnType<typeof setTimeout> | null = null;
+      const FRAME_MS = 30;
+      const flushNow = (): void => {
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = null;
+        }
         setStreamingBlocks([...blocksRef.current]);
       };
-      flushBlocks();
+      const flushSoon = (): void => {
+        if (flushTimer) return;
+        flushTimer = setTimeout(() => {
+          flushTimer = null;
+          setStreamingBlocks([...blocksRef.current]);
+        }, FRAME_MS);
+      };
+      flushNow();
 
       const adapter = createApiAdapter({
         client,
@@ -1412,7 +1514,7 @@ export function App({ config }: AppProps): React.ReactElement {
               blocksRef.current.push(activeText);
             }
             activeText.text += ev.delta;
-            flushBlocks();
+            flushSoon();
           } else if (ev.type === "assistant_reasoning") {
             // Streaming CoT from a thinking model. Render in a dim/italic
             // pane; do NOT add to assistant content (the loop already
@@ -1422,7 +1524,7 @@ export function App({ config }: AppProps): React.ReactElement {
               blocksRef.current.push(activeReasoning);
             }
             activeReasoning.text += ev.delta;
-            flushBlocks();
+            flushSoon();
           } else if (ev.type === "tool_call_pending") {
             activeText = null;
             activeReasoning = null;
@@ -1434,7 +1536,7 @@ export function App({ config }: AppProps): React.ReactElement {
               status: "pending",
             };
             blocksRef.current.push(tb);
-            flushBlocks();
+            flushNow();
           } else if (ev.type === "tool_partial") {
             const tb = blocksRef.current.find(
               (b) => b.kind === "tool" && b.id === ev.call_id,
@@ -1442,14 +1544,14 @@ export function App({ config }: AppProps): React.ReactElement {
             if (tb) {
               if (!tb.partial) tb.partial = { stdout: "", stderr: "" };
               tb.partial[ev.channel] += ev.content;
-              flushBlocks();
+              flushSoon();
             }
           } else if (ev.type === "tool_denied") {
             const tb = blocksRef.current.find(
               (b) => b.kind === "tool" && b.id === ev.call_id,
             ) as ToolBlock | undefined;
             if (tb) tb.status = "denied";
-            flushBlocks();
+            flushNow();
           } else if (ev.type === "tool_result") {
             const tb = blocksRef.current.find(
               (b) => b.kind === "tool" && b.id === ev.call_id,
@@ -1459,7 +1561,7 @@ export function App({ config }: AppProps): React.ReactElement {
               tb.result = ev.result;
               if (ev.display) tb.display = ev.display;
             }
-            flushBlocks();
+            flushNow();
           } else if (ev.type === "sub_agent_event") {
             const tb = blocksRef.current.find(
               (b) => b.kind === "tool" && b.id === ev.parentCallId,
@@ -1471,7 +1573,7 @@ export function App({ config }: AppProps): React.ReactElement {
                 tb.subAgentEvents.push({ id: randomUUID(), label });
               }
             }
-            flushBlocks();
+            flushNow();
           } else if (ev.type === "turn_complete") {
             if (ev.usage) {
               setTokenUsage((prev) => addUsage(prev, ev.usage));
@@ -1514,6 +1616,10 @@ export function App({ config }: AppProps): React.ReactElement {
       } catch (err) {
         setNotice(`Request failed: ${formatError(err)}`);
       } finally {
+        if (flushTimer) {
+          clearTimeout(flushTimer);
+          flushTimer = null;
+        }
         setStreamingBlocks(undefined);
         setChatBusy(false);
       }

@@ -118,6 +118,19 @@ export {
 } from "./agent/custom-subagents.js";
 export type { CustomSubagent } from "./agent/custom-subagents.js";
 
+// Custom skills
+export {
+  discoverCustomSkills,
+  parseCustomSkill,
+  applyCustomSkill,
+  substituteSkillBody,
+} from "./discovery/custom-skills.js";
+export type {
+  CustomSkill,
+  AppliedCustomSkill,
+  DiscoverOptions as CustomSkillDiscoverOptions,
+} from "./discovery/custom-skills.js";
+
 // Auto-compact
 export {
   shouldAutoCompact,
@@ -191,6 +204,7 @@ export {
   listDir,
   spawnAgent,
   createSpawnAgentTool,
+  createSkillTool,
   webFetch,
   webSearch,
   builtInTools,

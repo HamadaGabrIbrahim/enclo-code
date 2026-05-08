@@ -23,6 +23,9 @@ export type SlashCommandName =
   | "reload-hooks"
   | "agents"
   | "reload-agents"
+  | "skills"
+  | "reload-skills"
+  | "skill"
   | "reasoning";
 
 export interface SlashCommand {
@@ -53,6 +56,9 @@ export const COMMANDS: SlashCommand[] = [
   { name: "reload-hooks", description: "Re-read ~/.enclo/hooks.json + .enclo/hooks.json" },
   { name: "agents", description: "List registered custom subagents (name + description)" },
   { name: "reload-agents", description: "Re-discover custom subagents from .enclo/agents/" },
+  { name: "skills", description: "List registered skills (name + when-to-use)" },
+  { name: "reload-skills", description: "Re-discover skills from .enclo/skills/" },
+  { name: "skill", description: "Run a skill as the next prompt: /skill <name> [args]" },
   { name: "reasoning", description: "Collapse / expand the most recent thinking pane" },
   { name: "help", description: "Show this help" },
   { name: "exit", description: "Quit enclo" },

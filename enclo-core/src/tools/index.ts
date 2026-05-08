@@ -7,6 +7,7 @@ import { grep } from "./grep.js";
 import { glob } from "./glob.js";
 import { listDir } from "./list_dir.js";
 import { spawnAgent, createSpawnAgentTool } from "./spawn_agent.js";
+import { createSkillTool } from "./skill.js";
 import { webFetch } from "./web_fetch.js";
 import { webSearch } from "./web_search.js";
 
@@ -20,6 +21,7 @@ export {
   listDir,
   spawnAgent,
   createSpawnAgentTool,
+  createSkillTool,
   webFetch,
   webSearch,
 };

@@ -31,7 +31,7 @@ const SEVERITY_COLOR: Record<ContextSeverity, string> = {
  * except for the (rare) warn/danger context-fill state. Numbers themselves
  * are rendered in normal weight so they're scannable.
  */
-export function Footer({
+function FooterImpl({
   usage,
   contextLength,
   costRates,
@@ -65,3 +65,5 @@ export function Footer({
     </Box>
   );
 }
+
+export const Footer = React.memo(FooterImpl);

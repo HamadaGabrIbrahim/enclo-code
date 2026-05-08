@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import Spinner from "ink-spinner";
 import { theme } from "../theme.js";
@@ -24,7 +24,7 @@ function truncate(value: string, max: number): string {
  * Only the brand mark uses the accent color so the user's eye lands on
  * actual content, not the chrome.
  */
-export function Header({
+function HeaderImpl({
   email,
   apiUrl,
   activeModel,
@@ -32,7 +32,18 @@ export function Header({
   streaming = false,
 }: HeaderProps): React.ReactElement {
   const { stdout } = useStdout();
-  const cols = stdout?.columns ?? 120;
+  // Memoization stops parent re-renders from reaching us, so we have to
+  // subscribe to terminal resize ourselves to keep the rule width accurate.
+  const [cols, setCols] = useState<number>(stdout?.columns ?? 120);
+  useEffect(() => {
+    if (!stdout) return;
+    const onResize = (): void => setCols(stdout.columns ?? 120);
+    stdout.on("resize", onResize);
+    return () => {
+      stdout.off("resize", onResize);
+    };
+  }, [stdout]);
+
   const segCap = Math.max(12, Math.floor(cols / 4));
   const url = truncate(apiUrl ?? "(no server)", segCap);
   const who = truncate(email ?? "signed out", segCap);
@@ -69,3 +80,5 @@ export function Header({
     </Box>
   );
 }
+
+export const Header = React.memo(HeaderImpl);
